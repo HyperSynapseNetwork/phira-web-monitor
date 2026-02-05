@@ -18,7 +18,7 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
+        padding: 2rem;
         color: #fff;
       }
       h1 {
@@ -28,29 +28,142 @@
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
       }
-      #status {
-        padding: 1rem 2rem;
+      .card {
+        padding: 1.5rem 2rem;
         background: rgba(255, 255, 255, 0.1);
-        border-radius: 8px;
+        border-radius: 12px;
         margin-bottom: 1rem;
+        width: 100%;
+        max-width: 500px;
+        backdrop-filter: blur(10px);
+      }
+      .card h2 {
+        font-size: 1rem;
+        color: #94a3b8;
+        margin-bottom: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
       }
       #result {
-        font-size: 1.2rem;
+        font-size: 1.1rem;
         color: #4ade80;
       }
-      .loading {
-        color: #facc15;
+      .loading { color: #facc15; }
+      .error { color: #f87171; }
+      
+      .input-group {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
       }
-      .error {
-        color: #f87171;
+      input[type="text"] {
+        flex: 1;
+        padding: 0.75rem 1rem;
+        border: 1px solid rgba(255,255,255,0.2);
+        border-radius: 8px;
+        background: rgba(0,0,0,0.3);
+        color: #fff;
+        font-size: 1rem;
+        outline: none;
+        transition: border-color 0.2s;
+      }
+      input[type="text"]:focus {
+        border-color: #3a7bd5;
+      }
+      input[type="text"]::placeholder {
+        color: #64748b;
+      }
+      button {
+        padding: 0.75rem 1.5rem;
+        border: none;
+        border-radius: 8px;
+        background: linear-gradient(135deg, #3a7bd5, #00d2ff);
+        color: #fff;
+        font-size: 1rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: transform 0.1s, opacity 0.2s;
+      }
+      button:hover {
+        opacity: 0.9;
+      }
+      button:active {
+        transform: scale(0.98);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      #parse-result {
+        font-family: 'Monaco', 'Consolas', monospace;
+        font-size: 0.9rem;
+        white-space: pre-wrap;
+        word-break: break-all;
+        color: #e2e8f0;
+        min-height: 100px;
+        padding: 1rem;
+        background: rgba(0,0,0,0.3);
+        border-radius: 8px;
+      }
+      #parse-result.success { color: #4ade80; }
+      #parse-result.error { color: #f87171; }
+      #parse-result.loading { color: #facc15; }
+      
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1rem;
+        margin-top: 1rem;
+      }
+      .stat {
+        text-align: center;
+        padding: 0.75rem;
+        background: rgba(0,0,0,0.2);
+        border-radius: 8px;
+      }
+      .stat-value {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: #3a7bd5;
+      }
+      .stat-label {
+        font-size: 0.75rem;
+        color: #94a3b8;
+        margin-top: 0.25rem;
       }
     </style>
   </head>
   <body>
     <h1>Phira Web Monitor</h1>
-    <div id="status">
+    
+    <div class="card">
+      <h2>WASM Module Status</h2>
       <span id="result" class="loading">Loading WASM module...</span>
     </div>
+    
+    <div class="card" id="parser-test">
+      <h2>Chart Parser Test</h2>
+      <div class="input-group">
+        <input type="text" id="chart-id" placeholder="Enter chart ID (e.g. 1234)" />
+        <button id="parse-btn" disabled>Parse</button>
+      </div>
+      <div id="parse-result">Enter a chart ID and click Parse to test the RPE parser.</div>
+      <div class="stats" id="stats" style="display: none;">
+        <div class="stat">
+          <div class="stat-value" id="stat-lines">0</div>
+          <div class="stat-label">Judge Lines</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="stat-notes">0</div>
+          <div class="stat-label">Notes</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="stat-offset">0</div>
+          <div class="stat-label">Offset (ms)</div>
+        </div>
+      </div>
+    </div>
+    
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

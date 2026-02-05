@@ -1,3 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["monitor", "proxy"]
+members = [
+    "monitor-common",
+    "monitor-proxy",
+    "monitor-client",
+]
