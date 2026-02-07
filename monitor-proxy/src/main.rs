@@ -7,16 +7,19 @@
 
 use axum::{
     extract::Path,
-    http::{HeaderMap, HeaderValue, Method, StatusCode},
+    http::{HeaderValue, Method, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
     Router,
 };
-use monitor_common::rpe; // Use the parser from monitor crate
-use std::io::Cursor;
+use parse::rpe::{self, ResourceLoader};
+use std::io::{Cursor, Read};
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
+
+mod parse;
 
 const PHIRA_API_BASE: &str = "https://api.phira.cn";
 const LISTEN_PORT: u16 = 3080;
@@ -72,10 +75,38 @@ async fn fetch_and_parse_chart(Path(id): Path<String>) -> Response {
     }
 }
 
+struct ZipLoader {
+    archive: Arc<Mutex<zip::ZipArchive<Cursor<Vec<u8>>>>>,
+}
+
+impl ResourceLoader for ZipLoader {
+    fn load_file<'a>(
+        &'a mut self,
+        path: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<Vec<u8>>> + Send + 'a>>
+    {
+        let archive = self.archive.clone();
+        let path = path.to_string();
+        Box::pin(async move {
+            // Memory operations are fast enough to be synchronous here
+            let mut archive = archive.lock().unwrap();
+            let mut file = archive.by_name(&path)?;
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer)?;
+            Ok(buffer)
+        })
+    }
+}
+
 async fn process_chart(id: &str) -> anyhow::Result<Vec<u8>> {
     let client = reqwest::Client::new();
 
     // 1. Get chart info
+    if id == "test" {
+        log::info!("Generating test chart...");
+        return generate_test_chart();
+    }
+
     let info_url = format!("{}/chart/{}", PHIRA_API_BASE, id);
     let info_resp = client.get(&info_url).send().await?;
     if !info_resp.status().is_success() {
@@ -100,10 +131,10 @@ async fn process_chart(id: &str) -> anyhow::Result<Vec<u8>> {
             file_resp.status()
         ));
     }
-    let zip_bytes = file_resp.bytes().await?;
+    let zip_bytes = file_resp.bytes().await?.to_vec();
 
     // 3. Unzip and find chart.json
-    let reader = Cursor::new(zip_bytes);
+    let reader = Cursor::new(zip_bytes.clone());
     let mut zip = zip::ZipArchive::new(reader)?;
 
     let mut chart_json = String::new();
@@ -113,7 +144,6 @@ async fn process_chart(id: &str) -> anyhow::Result<Vec<u8>> {
     for i in 0..len {
         let mut file = zip.by_index(i)?;
         if file.name().ends_with(".json") && (file.name().contains("chart") || len == 1 || !found) {
-            use std::io::Read;
             chart_json.clear();
             file.read_to_string(&mut chart_json)?;
             found = true;
@@ -129,11 +159,70 @@ async fn process_chart(id: &str) -> anyhow::Result<Vec<u8>> {
     }
 
     // 4. Parse RPE chart
-    let chart =
-        rpe::parse_rpe(&chart_json).map_err(|e| anyhow::anyhow!("RPE parse error: {}", e))?;
+    let reader = Cursor::new(zip_bytes);
+    let archive = Arc::new(Mutex::new(zip::ZipArchive::new(reader)?));
+    let mut loader = ZipLoader { archive };
+
+    let chart = rpe::parse_rpe(&chart_json, &mut loader)
+        .await
+        .map_err(|e| anyhow::anyhow!("RPE parse error: {}", e))?;
 
     // 5. Serialize to bincode
     let encoded = bincode::serialize(&chart)?;
 
+    Ok(encoded)
+}
+
+fn generate_test_chart() -> anyhow::Result<Vec<u8>> {
+    use monitor_common::core::{AnimFloat, Chart, JudgeLine, Keyframe, Note, NoteKind};
+
+    let mut line = JudgeLine::default();
+
+    // Set default speed/height for test chart
+    const HEIGHT_PER_SEC: f32 = 600.0;
+
+    line.height = AnimFloat::new(vec![
+        Keyframe::new(0.0, 0.0, 2), // 2 = Linear
+        Keyframe::new(100.0, 100.0 * HEIGHT_PER_SEC, 0),
+    ]);
+
+    // Helper to set note at time
+    let mut add_note = |kind: NoteKind, time: f32| {
+        let h = time * HEIGHT_PER_SEC;
+        line.notes.push(Note {
+            kind,
+            time,
+            height: h,
+            speed: 1.0,
+            ..Default::default()
+        });
+    };
+
+    // Add some notes
+    add_note(NoteKind::Click, 2.0);
+    add_note(NoteKind::Click, 3.0);
+    add_note(NoteKind::Drag, 3.5);
+    add_note(NoteKind::Flick, 4.0);
+
+    let start_t = 5.0;
+    let end_t = 7.0;
+    line.notes.push(Note {
+        kind: NoteKind::Hold {
+            end_time: end_t,
+            end_height: end_t * HEIGHT_PER_SEC,
+        },
+        time: start_t,
+        height: start_t * HEIGHT_PER_SEC,
+        speed: 1.0,
+        ..Default::default()
+    });
+
+    let chart = Chart {
+        offset: 0.0,
+        lines: vec![line],
+        ..Default::default()
+    };
+
+    let encoded = bincode::serialize(&chart)?;
     Ok(encoded)
 }

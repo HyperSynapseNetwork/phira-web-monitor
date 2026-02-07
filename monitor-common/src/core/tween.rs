@@ -3,6 +3,7 @@
 //! Ported from prpr/src/core/tween.rs
 //! Provides interpolation functions for chart animations.
 
+use super::{Color, Vector};
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 use std::ops::Range;
@@ -210,29 +211,20 @@ impl TweenFunction for StaticTween {
 
 /// A clamped tween that uses only a portion of the easing curve
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClampedTween {
-    pub id: TweenId,
-    pub x_range: Range<f32>,
-    pub y_range: Range<f32>,
-}
+pub struct ClampedTween(pub TweenId, pub Range<f32>, pub Range<f32>);
 
 impl ClampedTween {
     pub fn new(tween: TweenId, range: Range<f32>) -> Self {
         let f = TWEEN_FUNCTIONS[tween as usize];
         let y_range = f(range.start)..f(range.end);
-        Self {
-            id: tween,
-            x_range: range,
-            y_range,
-        }
+        Self(tween, range, y_range)
     }
 }
 
 impl TweenFunction for ClampedTween {
     fn y(&self, x: f32) -> f32 {
-        let mapped_x = self.x_range.start + (self.x_range.end - self.x_range.start) * x;
-        let raw_y = TWEEN_FUNCTIONS[self.id as usize](mapped_x);
-        (raw_y - self.y_range.start) / (self.y_range.end - self.y_range.start)
+        (TWEEN_FUNCTIONS[self.0 as usize](f32::tween(&self.1.start, &self.1.end, x)) - self.2.start)
+            / (self.2.end - self.2.start)
     }
 }
 
@@ -353,6 +345,9 @@ impl TweenFunction for BezierTween {
 /// Trait for types that can be interpolated
 pub trait Tweenable: Clone {
     fn tween(a: &Self, b: &Self, t: f32) -> Self;
+    fn add(_x: &Self, _y: &Self) -> Self {
+        unimplemented!()
+    }
 }
 
 impl Tweenable for f32 {
@@ -361,9 +356,93 @@ impl Tweenable for f32 {
     }
 }
 
-impl Tweenable for (f32, f32) {
-    fn tween(a: &Self, b: &Self, t: f32) -> Self {
-        (f32::tween(&a.0, &b.0, t), f32::tween(&a.1, &b.1, t))
+impl Tweenable for Vector {
+    fn tween(x: &Self, y: &Self, t: f32) -> Self {
+        Vector::new(f32::tween(&x.x, &y.x, t), f32::tween(&x.y, &y.y, t))
+    }
+
+    fn add(x: &Self, y: &Self) -> Self {
+        Vector::new(x.x + y.x, x.y + y.y)
+    }
+}
+
+impl Tweenable for Color {
+    fn tween(x: &Self, y: &Self, t: f32) -> Self {
+        Self::new(
+            f32::tween(&x.r, &y.r, t),
+            f32::tween(&x.g, &y.g, t),
+            f32::tween(&x.b, &y.b, t),
+            f32::tween(&x.a, &y.a, t),
+        )
+    }
+}
+
+impl Tweenable for String {
+    fn tween(x: &Self, y: &Self, t: f32) -> Self {
+        if x.contains("%P%") && y.contains("%P%") {
+            let x = x.replace("%P%", "");
+            let y = y.replace("%P%", "");
+            if t >= 1. {
+                y
+            } else if t <= 0. {
+                x
+            } else {
+                let x: f32 = x.parse().unwrap_or(0.0);
+                let y: f32 = y.parse().unwrap_or(0.0);
+                let value = x + t * (y - x);
+                if x.fract() == 0.0 && y.fract() == 0.0 {
+                    format!("{:.0}", value)
+                } else {
+                    format!("{:.3}", value)
+                }
+            }
+        } else if x.is_empty() && y.is_empty() {
+            Self::new()
+        } else if y.is_empty() {
+            let x = if x.contains("%P%") {
+                x.replace("%P%", "")
+            } else {
+                x.to_string()
+            };
+            Self::tween(y, &x, 1. - t)
+        } else if x.is_empty() {
+            let chars = y.chars().collect::<Vec<_>>();
+            chars[..(t * chars.len() as f32).round() as usize]
+                .iter()
+                .collect()
+        } else {
+            let x_len = x.chars().count();
+            let y_len = y.chars().count();
+            if y.starts_with(x) {
+                // x in y
+                let take_num = ((y_len - x_len) as f32 * t).floor() as usize + x_len;
+                let mut text = x.clone();
+                text.push_str(
+                    &y.chars()
+                        .skip(x_len)
+                        .take(take_num - x_len)
+                        .collect::<String>(),
+                );
+                text
+            } else if x.starts_with(y) {
+                // y in x
+                let take_num = ((x_len - y_len) as f32 * (1. - t)).round() as usize + y_len;
+                let mut text = y.clone();
+                text.push_str(
+                    &x.chars()
+                        .skip(y_len)
+                        .take(take_num - y_len)
+                        .collect::<String>(),
+                );
+                text
+            } else {
+                if x.contains("%P%") {
+                    x.replace("%P%", "")
+                } else {
+                    x.clone()
+                }
+            }
+        }
     }
 }
 

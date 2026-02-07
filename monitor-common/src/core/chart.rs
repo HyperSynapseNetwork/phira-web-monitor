@@ -3,16 +3,14 @@
 //! Simplified from prpr/src/core for the web monitor.
 //! Contains only data definitions without rendering logic.
 
-use crate::anim::{AnimFloat, AnimVector};
-use crate::bpm::BpmList;
-use crate::object::{CtrlObject, Object};
+use super::{Anim, AnimFloat, AudioClip, BpmList, Color, CtrlObject, Object, Texture};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ============================================================================
 // Note types
 // ============================================================================
 
-/// Type of note
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum NoteKind {
     Click,
@@ -43,7 +41,6 @@ impl Default for NoteKind {
     }
 }
 
-/// A single note in the chart
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Note {
     /// Object transform animations
@@ -62,19 +59,22 @@ pub struct Note {
     pub multiple_hint: bool,
     /// Whether this is a fake note (doesn't count for score)
     pub fake: bool,
+    /// Index of the hitsound in the chart's audio clips
+    pub hitsound: Option<HitSound>,
 }
 
 impl Default for Note {
     fn default() -> Self {
         Self {
             object: Object::default(),
-            kind: NoteKind::Click,
-            time: 0.0,
-            height: 0.0,
-            speed: 1.0,
-            above: true,
+            kind: NoteKind::default(),
+            time: 0.,
+            height: 0.,
+            speed: 1.,
+            above: false,
             multiple_hint: false,
             fake: false,
+            hitsound: None,
         }
     }
 }
@@ -82,11 +82,27 @@ impl Default for Note {
 impl Note {
     pub fn new(kind: NoteKind, time: f32, height: f32) -> Self {
         Self {
+            object: Object::default(),
             kind,
             time,
             height,
-            ..Default::default()
+            speed: 1.,
+            above: false,
+            multiple_hint: false,
+            fake: false,
+            hitsound: None,
         }
+    }
+
+    pub fn rotation(&self, line: &JudgeLine) -> f32 {
+        line.object.rotation.now() + if self.above { 0. } else { 180. }
+    }
+
+    pub fn plain(&self) -> bool {
+        !self.fake
+            && !matches!(self.kind, NoteKind::Hold { .. })
+            && self.object.translation.y.keyframes.len() <= 1
+        // && self.ctrl_obj.is_default()
     }
 
     /// Set time for the note's animations
@@ -107,17 +123,38 @@ impl Note {
 // Judge Line types
 // ============================================================================
 
-/// Type of judge line
+#[derive(Clone, Serialize, Deserialize)]
+pub struct GifFrames {
+    /// time of each frame in milliseconds
+    pub frames: Vec<(u128, Texture)>,
+    /// milliseconds
+    pub total_time: u128,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[repr(u8)]
+pub enum UIElement {
+    Pause = 1,
+    ComboNumber = 2,
+    Combo = 3,
+    Score = 4,
+    Bar = 5,
+    Name = 6,
+    Level = 7,
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub enum JudgeLineKind {
     #[default]
     Normal,
-    Texture(String), // Texture path
-    Text(String),    // Text content
+    Texture(Texture, String),
+    TextureGif(Anim<f32>, GifFrames, String),
+    Text(Anim<String>),
+    Paint(Anim<f32>),
 }
 
-/// A judge line containing notes
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct JudgeLine {
     /// Object transform animations
     pub object: Object,
@@ -125,63 +162,34 @@ pub struct JudgeLine {
     pub ctrl_obj: CtrlObject,
     /// Kind of judge line
     pub kind: JudgeLineKind,
-    /// Notes on this line
-    pub notes: Vec<Note>,
-    /// Speed animation
-    pub speed: AnimFloat,
-    /// Height animation (vertical position)
+    /// Height Animation
     pub height: AnimFloat,
     /// Incline animation (perspective tilt)
     pub incline: AnimFloat,
     /// Color animation (r, g, b packed or separate animations)
-    pub color: AnimVector,
-    /// Alpha animation
-    pub alpha: AnimFloat,
+    pub color: Anim<Color>,
+    /// Notes on this line
+    pub notes: Vec<Note>,
     /// Parent line index (for attached lines)
     pub parent: Option<usize>,
-    /// Whether to show line
-    pub show_below: bool,
     /// Z-order for rendering
-    pub z_order: i32,
-}
-
-impl Default for JudgeLine {
-    fn default() -> Self {
-        Self {
-            object: Object::default(),
-            ctrl_obj: CtrlObject::default(),
-            kind: JudgeLineKind::Normal,
-            notes: Vec::new(),
-            speed: AnimFloat::default(),
-            height: AnimFloat::default(),
-            incline: AnimFloat::default(),
-            color: AnimVector::default(),
-            alpha: AnimFloat::default(),
-            parent: None,
-            show_below: true,
-            z_order: 0,
-        }
-    }
+    pub z_index: i32,
+    /// Whether to show notes below the line, here below is defined in the time axis, which means the note should already be judged
+    pub show_below: bool,
+    // UI element to attach
+    pub attach_ui: Option<UIElement>,
 }
 
 impl JudgeLine {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Set time for all animations
     pub fn set_time(&mut self, time: f32) {
         self.object.set_time(time);
-        self.speed.set_time(time);
         self.height.set_time(time);
         self.incline.set_time(time);
         self.color.set_time(time);
-        self.alpha.set_time(time);
-    }
-
-    /// Get current alpha value
-    pub fn now_alpha(&self) -> f32 {
-        self.alpha.now_opt().unwrap_or(1.0).clamp(0.0, 1.0)
+        for note in &mut self.notes {
+            note.set_time(time);
+        }
     }
 
     /// Get current height
@@ -206,8 +214,19 @@ pub struct ChartSettings {
     pub hold_partial_cover: bool,
 }
 
+/// HitSound
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HitSound {
+    Click,
+    Drag,
+    Flick,
+    Custom(String),
+}
+
+pub type HitSoundMap = HashMap<HitSound, AudioClip>;
+
 /// A complete chart
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Chart {
     /// Offset in seconds (for sync adjustment)
     pub offset: f32,
@@ -217,17 +236,14 @@ pub struct Chart {
     pub bpm_list: BpmList,
     /// Chart settings
     pub settings: ChartSettings,
-}
-
-impl Default for Chart {
-    fn default() -> Self {
-        Self {
-            offset: 0.0,
-            lines: Vec::new(),
-            bpm_list: BpmList::default(),
-            settings: ChartSettings::default(),
-        }
-    }
+    // pub extra: ChartExtra,
+    // /// Line order according to z-index, lines with attach_ui will be removed from this list
+    // ///
+    // /// Store the index of the line in z-index ascending order
+    // pub order: Vec<usize>,
+    // /// TODO: docs from RPE
+    // pub attach_ui: [Option<usize>; 7],
+    pub hitsounds: HitSoundMap,
 }
 
 impl Chart {
@@ -236,7 +252,7 @@ impl Chart {
             offset,
             lines,
             bpm_list,
-            settings: ChartSettings::default(),
+            ..Default::default()
         }
     }
 
@@ -244,9 +260,6 @@ impl Chart {
     pub fn set_time(&mut self, time: f32) {
         for line in &mut self.lines {
             line.set_time(time);
-            for note in &mut line.notes {
-                note.set_time(time);
-            }
         }
     }
 

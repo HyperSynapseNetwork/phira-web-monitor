@@ -3,17 +3,23 @@
 //! Ported from prpr/src/core/anim.rs
 //! Provides keyframe-based animation for chart elements.
 
-use crate::tween::{BezierTween, TweenFunction, TweenId, Tweenable, TWEEN_FUNCTIONS};
+use super::tween::{BezierTween, ClampedTween, TweenFunction, TweenId, Tweenable, TWEEN_FUNCTIONS};
+use super::Vector;
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Serialize, Deserialize)]
+pub enum TweenFn {
+    TweenId(TweenId),
+    Bezier(BezierTween),
+    Clamped(ClampedTween),
+}
 
 /// A keyframe in an animation
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Keyframe<T> {
     pub time: f32,
     pub value: T,
-    pub tween: TweenId,
-    /// Optional bezier control points for custom easing
-    pub bezier: Option<BezierTween>,
+    pub tween: TweenFn,
 }
 
 impl<T> Keyframe<T> {
@@ -21,8 +27,7 @@ impl<T> Keyframe<T> {
         Self {
             time,
             value,
-            tween,
-            bezier: None,
+            tween: TweenFn::TweenId(tween),
         }
     }
 
@@ -30,17 +35,24 @@ impl<T> Keyframe<T> {
         Self {
             time,
             value,
-            tween: 2, // Linear as fallback
-            bezier: Some(BezierTween::new(p1, p2)),
+            tween: TweenFn::Bezier(BezierTween::new(p1, p2)),
+        }
+    }
+
+    pub fn with_clamped(time: f32, value: T, tween: std::ops::Range<f32>, id: TweenId) -> Self {
+        Self {
+            time,
+            value,
+            tween: TweenFn::Clamped(ClampedTween::new(id, tween)),
         }
     }
 
     /// Get the eased value for progress t in [0, 1]
     pub fn ease(&self, t: f32) -> f32 {
-        if let Some(ref bezier) = self.bezier {
-            bezier.y(t)
-        } else {
-            TWEEN_FUNCTIONS[self.tween as usize](t)
+        match self.tween {
+            TweenFn::Bezier(ref bezier) => bezier.y(t),
+            TweenFn::Clamped(ref clamped) => clamped.y(t),
+            TweenFn::TweenId(tween) => TWEEN_FUNCTIONS[tween as usize](t),
         }
     }
 }
@@ -50,17 +62,19 @@ impl<T> Keyframe<T> {
 /// The tween function is taken from the first keyframe of each interval.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Anim<T: Tweenable> {
+    pub time: f32,
     pub keyframes: Vec<Keyframe<T>>,
-    time: f32,
-    cursor: usize,
+    pub cursor: usize,
+    pub next: Option<Box<Anim<T>>>,
 }
 
 impl<T: Tweenable> Default for Anim<T> {
     fn default() -> Self {
         Self {
-            keyframes: Vec::new(),
             time: 0.0,
+            keyframes: Vec::new(),
             cursor: 0,
+            next: None,
         }
     }
 }
@@ -68,92 +82,100 @@ impl<T: Tweenable> Default for Anim<T> {
 impl<T: Tweenable> Anim<T> {
     pub fn new(keyframes: Vec<Keyframe<T>>) -> Self {
         Self {
-            keyframes,
             time: 0.0,
+            keyframes,
             cursor: 0,
+            next: None,
         }
     }
 
     /// Create an animation with a fixed (constant) value
     pub fn fixed(value: T) -> Self {
         Self {
-            keyframes: vec![Keyframe::new(0.0, value, 0)], // tween 0 = hold
             time: 0.0,
+            keyframes: vec![Keyframe::new(0.0, value, 0)], // tween 0 = hold
             cursor: 0,
+            next: None,
         }
     }
 
-    /// Check if animation has no keyframes
-    pub fn is_empty(&self) -> bool {
-        self.keyframes.is_empty()
+    pub fn is_default(&self) -> bool {
+        self.keyframes.is_empty() && self.next.is_none()
     }
 
-    /// Check if cursor is at the last keyframe
-    pub fn is_finished(&self) -> bool {
+    pub fn chain(elements: Vec<Anim<T>>) -> Self {
+        if elements.is_empty() {
+            return Self::default();
+        }
+        let mut elements: Vec<_> = elements.into_iter().map(Box::new).collect();
+        elements.last_mut().unwrap().next = None;
+        while elements.len() > 1 {
+            let last = elements.pop().unwrap();
+            elements.last_mut().unwrap().next = Some(last);
+        }
+        *elements.into_iter().next().unwrap()
+    }
+
+    pub fn dead(&self) -> bool {
         self.cursor + 1 >= self.keyframes.len()
     }
 
-    /// Get current time
-    pub fn time(&self) -> f32 {
-        self.time
-    }
-
-    /// Set current time and update cursor position
     pub fn set_time(&mut self, time: f32) {
         if self.keyframes.is_empty() || time == self.time {
             self.time = time;
             return;
         }
-
-        // Move cursor forward
         while let Some(kf) = self.keyframes.get(self.cursor + 1) {
             if kf.time > time {
                 break;
             }
             self.cursor += 1;
         }
-
-        // Move cursor backward
         while self.cursor != 0 && self.keyframes[self.cursor].time > time {
             self.cursor -= 1;
         }
-
         self.time = time;
+        if let Some(next) = &mut self.next {
+            next.set_time(time);
+        }
     }
 
-    /// Get current interpolated value, if any keyframes exist
-    pub fn now_opt(&self) -> Option<T> {
+    fn now_opt_inner(&self) -> Option<T> {
         if self.keyframes.is_empty() {
             return None;
         }
-
-        // At or past last keyframe
-        if self.cursor == self.keyframes.len() - 1 {
-            return Some(self.keyframes[self.cursor].value.clone());
-        }
-
-        // Interpolate between two keyframes
-        let kf1 = &self.keyframes[self.cursor];
-        let kf2 = &self.keyframes[self.cursor + 1];
-        let t = (self.time - kf1.time) / (kf2.time - kf1.time);
-        let eased_t = kf1.ease(t.clamp(0.0, 1.0));
-
-        Some(T::tween(&kf1.value, &kf2.value, eased_t))
+        Some(if self.cursor == self.keyframes.len() - 1 {
+            self.keyframes[self.cursor].value.clone()
+        } else {
+            let kf1 = &self.keyframes[self.cursor];
+            let kf2 = &self.keyframes[self.cursor + 1];
+            let t = (self.time - kf1.time) / (kf2.time - kf1.time);
+            T::tween(&kf1.value, &kf2.value, kf1.ease(t))
+        })
     }
 
-    /// Apply a transformation to all keyframe values
-    pub fn map_values<F>(&mut self, mut f: F)
-    where
-        F: FnMut(&T) -> T,
-    {
-        for kf in &mut self.keyframes {
-            kf.value = f(&kf.value);
+    pub fn now_opt(&self) -> Option<T> {
+        let Some(now) = self.now_opt_inner() else {
+            return None;
+        };
+        Some(if let Some(next) = &self.next {
+            T::add(&now, &next.now_opt().unwrap())
+        } else {
+            now
+        })
+    }
+
+    pub fn map_value(&mut self, mut f: impl FnMut(T) -> T) {
+        self.keyframes
+            .iter_mut()
+            .for_each(|it| it.value = f(it.value.clone()));
+        if let Some(next) = &mut self.next {
+            next.map_value(f);
         }
     }
 }
 
 impl<T: Tweenable + Default> Anim<T> {
-    /// Get current value, or default if no keyframes
     pub fn now(&self) -> T {
         self.now_opt().unwrap_or_default()
     }
@@ -174,10 +196,10 @@ impl AnimVector {
         Self { x, y }
     }
 
-    pub fn fixed(x: f32, y: f32) -> Self {
+    pub fn fixed(v: Vector) -> Self {
         Self {
-            x: AnimFloat::fixed(x),
-            y: AnimFloat::fixed(y),
+            x: AnimFloat::fixed(v.x),
+            y: AnimFloat::fixed(v.y),
         }
     }
 
@@ -186,15 +208,12 @@ impl AnimVector {
         self.y.set_time(time);
     }
 
-    pub fn now(&self) -> (f32, f32) {
-        (self.x.now(), self.y.now())
+    pub fn now(&self) -> Vector {
+        Vector::new(self.x.now(), self.y.now())
     }
 
-    pub fn now_with_default(&self, def_x: f32, def_y: f32) -> (f32, f32) {
-        (
-            self.x.now_opt().unwrap_or(def_x),
-            self.y.now_opt().unwrap_or(def_y),
-        )
+    pub fn now_with_default(&self, x: f32, y: f32) -> Vector {
+        Vector::new(self.x.now_opt().unwrap_or(x), self.y.now_opt().unwrap_or(y))
     }
 }
 

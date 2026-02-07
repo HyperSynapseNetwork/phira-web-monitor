@@ -11,41 +11,87 @@
         box-sizing: border-box;
       }
       body {
-        font-family:
-          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        padding: 2rem;
-        color: #fff;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #0d1117;
+        color: #c9d1d9;
+        overflow: hidden;
+        width: 100vw;
+        height: 100vh;
       }
+
+      #gl-canvas {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          z-index: 0;
+      }
+
+      #ui-layer {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          z-index: 10;
+          pointer-events: none;
+          display: flex;
+          flex-direction: column;
+          justify-content: flex-start;
+          align-items: flex-end; /* Align right */
+          padding: 2rem;
+      }
+      
+      .card, button, input {
+          pointer-events: auto;
+      }
+      
+      .brand {
+        position: absolute;
+        top: 2rem;
+        left: 2rem;
+        pointer-events: none;
+      }
+
       h1 {
-        margin-bottom: 1rem;
+        margin: 0;
         font-size: 2rem;
         background: linear-gradient(90deg, #00d2ff, #3a7bd5);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
+        text-shadow: 0 2px 10px rgba(0,0,0,0.5);
       }
+      
       .card {
-        padding: 1.5rem 2rem;
-        background: rgba(255, 255, 255, 0.1);
+        padding: 1.5rem;
+        background: rgba(13, 17, 23, 0.85); /* Darker backdrop */
+        border: 1px solid rgba(255,255,255,0.1);
         border-radius: 12px;
         margin-bottom: 1rem;
-        width: 100%;
-        max-width: 500px;
-        backdrop-filter: blur(10px);
+        width: 350px; /* Fixed width sidebar */
+        backdrop-filter: blur(12px);
+        box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        transition: opacity 0.3s;
       }
+      
+      .card:hover {
+          opacity: 1 !important;
+      }
+
       .card h2 {
-        font-size: 1rem;
+        font-size: 0.9rem;
         color: #94a3b8;
         margin-bottom: 0.75rem;
         text-transform: uppercase;
         letter-spacing: 0.5px;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+        padding-bottom: 0.5rem;
       }
       #result {
-        font-size: 1.1rem;
+        font-size: 1rem;
         color: #4ade80;
       }
       .loading { color: #facc15; }
@@ -57,111 +103,121 @@
         margin-bottom: 1rem;
       }
       input[type="text"] {
-        flex: 1;
-        padding: 0.75rem 1rem;
+        flex: 1; /* width handled by flex */
+        width: 100%;
+        padding: 0.6rem;
         border: 1px solid rgba(255,255,255,0.2);
-        border-radius: 8px;
-        background: rgba(0,0,0,0.3);
+        border-radius: 6px;
+        background: rgba(0,0,0,0.5);
         color: #fff;
-        font-size: 1rem;
+        font-size: 0.9rem;
         outline: none;
-        transition: border-color 0.2s;
       }
       input[type="text"]:focus {
         border-color: #3a7bd5;
       }
-      input[type="text"]::placeholder {
-        color: #64748b;
-      }
       button {
-        padding: 0.75rem 1.5rem;
+        padding: 0.6rem 1rem;
         border: none;
-        border-radius: 8px;
+        border-radius: 6px;
         background: linear-gradient(135deg, #3a7bd5, #00d2ff);
         color: #fff;
-        font-size: 1rem;
-        font-weight: 500;
+        font-size: 0.9rem;
+        font-weight: 600;
         cursor: pointer;
-        transition: transform 0.1s, opacity 0.2s;
       }
-      button:hover {
-        opacity: 0.9;
-      }
-      button:active {
-        transform: scale(0.98);
-      }
-      button:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
+      button:hover { opacity: 0.9; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      
       #parse-result {
         font-family: 'Monaco', 'Consolas', monospace;
-        font-size: 0.9rem;
+        font-size: 0.8rem;
         white-space: pre-wrap;
         word-break: break-all;
         color: #e2e8f0;
-        min-height: 100px;
-        padding: 1rem;
+        min-height: 60px;
+        max-height: 150px;
+        overflow-y: auto;
+        padding: 0.75rem;
         background: rgba(0,0,0,0.3);
-        border-radius: 8px;
+        border-radius: 6px;
+        margin-bottom: 0.5rem;
       }
-      #parse-result.success { color: #4ade80; }
-      #parse-result.error { color: #f87171; }
-      #parse-result.loading { color: #facc15; }
       
       .stats {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
-        gap: 1rem;
-        margin-top: 1rem;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
       }
       .stat {
         text-align: center;
-        padding: 0.75rem;
-        background: rgba(0,0,0,0.2);
-        border-radius: 8px;
+        padding: 0.5rem;
+        background: rgba(255,255,255,0.05);
+        border-radius: 6px;
       }
       .stat-value {
-        font-size: 1.5rem;
+        font-size: 1.1rem;
         font-weight: bold;
         color: #3a7bd5;
       }
       .stat-label {
-        font-size: 0.75rem;
+        font-size: 0.65rem;
         color: #94a3b8;
-        margin-top: 0.25rem;
+        margin-top: 0.1rem;
       }
+      
+      .status { font-size: 0.85rem; }
     </style>
   </head>
   <body>
-    <h1>Phira Web Monitor</h1>
+    <canvas id="gl-canvas"></canvas>
     
-    <div class="card">
-      <h2>WASM Module Status</h2>
-      <span id="result" class="loading">Loading WASM module...</span>
-    </div>
-    
-    <div class="card" id="parser-test">
-      <h2>Chart Parser Test</h2>
-      <div class="input-group">
-        <input type="text" id="chart-id" placeholder="Enter chart ID (e.g. 1234)" />
-        <button id="parse-btn" disabled>Parse</button>
-      </div>
-      <div id="parse-result">Enter a chart ID and click Parse to test the RPE parser.</div>
-      <div class="stats" id="stats" style="display: none;">
-        <div class="stat">
-          <div class="stat-value" id="stat-lines">0</div>
-          <div class="stat-label">Judge Lines</div>
+    <div id="ui-layer">
+        <div class="brand">
+            <h1>Phira Web Monitor</h1>
         </div>
-        <div class="stat">
-          <div class="stat-value" id="stat-notes">0</div>
-          <div class="stat-label">Notes</div>
+        
+        <div class="card">
+            <h2>Status</h2>
+            <div id="status" class="status">Connecting to server...</div>
+            <div id="wasm-status" class="status" style="margin-top: 5px; color: #888;">Loading WASM...</div>
+            <div id="result" style="display: none; margin-top: 5px;"></div>
         </div>
-        <div class="stat">
-          <div class="stat-value" id="stat-offset">0</div>
-          <div class="stat-label">Offset (ms)</div>
+        
+        <div class="card" id="parser-test">
+          <h2>Chart Loader</h2>
+          <div class="input-group">
+            <input type="text" id="chart-id" placeholder="Chart ID (e.g. 1234)" />
+            <button id="parse-btn" disabled>Load</button>
+          </div>
+          <div id="parse-result">Enter an ID to load.</div>
+          <div class="stats" id="stats" style="display: none;">
+            <div class="stat">
+              <div class="stat-value" id="stat-lines">0</div>
+              <div class="stat-label">Lines</div>
+            </div>
+            <div class="stat">
+              <div class="stat-value" id="stat-notes">0</div>
+              <div class="stat-label">Notes</div>
+            </div>
+            <div class="stat">
+              <div class="stat-value" id="stat-offset">0</div>
+              <div class="stat-label">Offset</div>
+            </div>
+          </div>
+          
+          <div style="margin-top: 1rem; text-align: left; background: rgba(0,0,0,0.2); padding: 0.5rem; border-radius: 6px;">
+             <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: #cbd5e1; font-size: 0.9rem;">
+                 <input type="checkbox" id="autoplay-check" checked style="width: auto; margin: 0;">
+                 Enable Autoplay & Effects
+             </label>
+          </div>
+          
+          <p style="font-size: 0.75rem; color: #666; margin-top: 0.5rem;">
+              Tip: Use ID "test" for a local test chart.
+          </p>
         </div>
-      </div>
     </div>
     
     <script type="module" src="/src/main.ts"></script>
