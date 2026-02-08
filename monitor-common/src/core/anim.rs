@@ -64,7 +64,7 @@ impl<T> Keyframe<T> {
 pub struct Anim<T: Tweenable> {
     pub time: f32,
     pub keyframes: Vec<Keyframe<T>>,
-    pub cursor: usize,
+    pub cursor: u32,
     pub next: Option<Box<Anim<T>>>,
 }
 
@@ -117,7 +117,7 @@ impl<T: Tweenable> Anim<T> {
     }
 
     pub fn dead(&self) -> bool {
-        self.cursor + 1 >= self.keyframes.len()
+        self.cursor as usize + 1 >= self.keyframes.len()
     }
 
     pub fn set_time(&mut self, time: f32) {
@@ -125,13 +125,13 @@ impl<T: Tweenable> Anim<T> {
             self.time = time;
             return;
         }
-        while let Some(kf) = self.keyframes.get(self.cursor + 1) {
+        while let Some(kf) = self.keyframes.get(self.cursor as usize + 1) {
             if kf.time > time {
                 break;
             }
             self.cursor += 1;
         }
-        while self.cursor != 0 && self.keyframes[self.cursor].time > time {
+        while self.cursor != 0 && self.keyframes[self.cursor as usize].time > time {
             self.cursor -= 1;
         }
         self.time = time;
@@ -144,11 +144,11 @@ impl<T: Tweenable> Anim<T> {
         if self.keyframes.is_empty() {
             return None;
         }
-        Some(if self.cursor == self.keyframes.len() - 1 {
-            self.keyframes[self.cursor].value.clone()
+        Some(if self.cursor as usize == self.keyframes.len() - 1 {
+            self.keyframes[self.cursor as usize].value.clone()
         } else {
-            let kf1 = &self.keyframes[self.cursor];
-            let kf2 = &self.keyframes[self.cursor + 1];
+            let kf1 = &self.keyframes[self.cursor as usize];
+            let kf2 = &self.keyframes[self.cursor as usize + 1];
             let t = (self.time - kf1.time) / (kf2.time - kf1.time);
             T::tween(&kf1.value, &kf2.value, kf1.ease(t))
         })

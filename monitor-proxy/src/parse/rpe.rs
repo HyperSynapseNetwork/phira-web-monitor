@@ -3,10 +3,11 @@
 //! Ported from prpr/src/parse/rpe.rs for the web monitor.
 //! Parses the JSON chart format used by RPE (Re:PhiEdit).
 
+use super::{process_lines, RPE_TWEEN_MAP};
 use monitor_common::core::{
-    colors::WHITE, easing_from, Anim, AnimFloat, AnimVector, AudioClip, BezierTween, BpmList,
-    Chart, Color, CtrlObject, GifFrames, HitSound, HitSoundMap, JudgeLine, JudgeLineKind, Keyframe,
-    Note, NoteKind, Object, Texture, Triple, TweenId, Tweenable, UIElement, EPS, HEIGHT_RATIO,
+    colors::WHITE, Anim, AnimFloat, AnimVector, AudioClip, BezierTween, BpmList, Chart, Color,
+    CtrlObject, GifFrames, HitSound, HitSoundMap, JudgeLine, JudgeLineKind, Keyframe, Note,
+    NoteKind, Object, Texture, Triple, Tweenable, UIElement, EPS, HEIGHT_RATIO,
 };
 
 use anyhow::{bail, Context, Result};
@@ -170,29 +171,6 @@ struct RPEChart {
 }
 
 type BezierMap = HashMap<(u16, i16, i16), BezierTween>;
-
-#[rustfmt::skip]
-pub const RPE_TWEEN_MAP: [TweenId; 30] = {
-    use monitor_common::core::TweenMajor::*;
-    use monitor_common::core::TweenMinor::*;
-    [
-        2, 2, // 0, 1: linear
-        easing_from(Sine, Out), easing_from(Sine, In),       // 2, 3
-        easing_from(Quad, Out), easing_from(Quad, In),       // 4, 5
-        easing_from(Sine, InOut), easing_from(Quad, InOut),  // 6, 7
-        easing_from(Cubic, Out), easing_from(Cubic, In),     // 8, 9
-        easing_from(Quart, Out), easing_from(Quart, In),     // 10, 11
-        easing_from(Cubic, InOut), easing_from(Quart, InOut),// 12, 13
-        easing_from(Quint, Out), easing_from(Quint, In),     // 14, 15
-        easing_from(Expo, Out), easing_from(Expo, In),       // 16, 17
-        easing_from(Circ, Out), easing_from(Circ, In),       // 18, 19
-        easing_from(Back, Out), easing_from(Back, In),       // 20, 21
-        easing_from(Circ, InOut), easing_from(Back, InOut),  // 22, 23
-        easing_from(Elastic, Out), easing_from(Elastic, In), // 24, 25
-        easing_from(Bounce, Out), easing_from(Bounce, In),   // 26, 27
-        easing_from(Bounce, InOut), easing_from(Elastic, InOut), // 28, 29
-    ]
-};
 
 fn bezier_key<T>(event: &RPEEvent<T>) -> (u16, i16, i16) {
     let p = &event.bezier_points;
@@ -902,6 +880,7 @@ pub async fn parse_rpe(source: &str, fs: &mut dyn ResourceLoader) -> Result<Char
         }
     }
 
+    process_lines(&mut lines);
     let mut chart = Chart::new(rpe.meta.offset as f32 / 1000.0, lines, r);
     chart.hitsounds = hitsounds;
     Ok(chart)

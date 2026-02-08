@@ -168,7 +168,10 @@ async fn process_chart(id: &str) -> anyhow::Result<Vec<u8>> {
         .map_err(|e| anyhow::anyhow!("RPE parse error: {}", e))?;
 
     // 5. Serialize to bincode
-    let encoded = bincode::serialize(&chart)?;
+    use bincode::Options;
+    let encoded = bincode::options()
+        .with_varint_encoding()
+        .serialize(&chart)?;
 
     Ok(encoded)
 }
@@ -178,8 +181,8 @@ fn generate_test_chart() -> anyhow::Result<Vec<u8>> {
 
     let mut line = JudgeLine::default();
 
-    // Set default speed/height for test chart
-    const HEIGHT_PER_SEC: f32 = 600.0;
+    // Normalized height per second (e.g. 1.0 unit per second)
+    const HEIGHT_PER_SEC: f32 = 1.0;
 
     line.height = AnimFloat::new(vec![
         Keyframe::new(0.0, 0.0, 2), // 2 = Linear
@@ -223,6 +226,9 @@ fn generate_test_chart() -> anyhow::Result<Vec<u8>> {
         ..Default::default()
     };
 
-    let encoded = bincode::serialize(&chart)?;
+    use bincode::Options;
+    let encoded = bincode::options()
+        .with_varint_encoding()
+        .serialize(&chart)?;
     Ok(encoded)
 }
