@@ -68,7 +68,7 @@ impl Object {
     #[inline]
     pub fn now_translation(&self, aspect_ratio: f32) -> Vector {
         let mut tr = self.translation.now();
-        tr.y *= aspect_ratio;
+        tr.y /= aspect_ratio;
         tr
     }
 

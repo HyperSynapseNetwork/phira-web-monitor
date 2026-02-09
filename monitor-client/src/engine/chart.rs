@@ -1,11 +1,10 @@
-use crate::engine::{line::draw_line, particle::ParticleSystem, resource::Resource};
+use crate::engine::{line::draw_line, resource::Resource};
 use crate::renderer::Renderer;
 use monitor_common::core::Chart;
 
 pub struct ChartRenderer {
     pub chart: Chart,
     pub resource: Resource,
-    pub particle_system: ParticleSystem,
     pub time: f32, // Seconds
 }
 
@@ -14,7 +13,6 @@ impl ChartRenderer {
         Self {
             chart,
             resource,
-            particle_system: ParticleSystem::new(),
             time: 0.0,
         }
     }
@@ -29,18 +27,20 @@ impl ChartRenderer {
         let dt = time - self.time;
         self.time = time;
         self.resource.time = time;
+        self.resource.dt = dt;
         self.chart.set_time(time);
-
-        if dt > 0.0 {
-            self.particle_system.update(dt);
-        }
     }
 
     pub fn render(&mut self, renderer: &mut Renderer) {
-        for line in &self.chart.lines {
-            draw_line(&mut self.resource, line, renderer);
+        for (i, line) in self.chart.lines.iter().enumerate() {
+            draw_line(&mut self.resource, line, renderer, i, &self.chart.settings);
         }
 
-        self.particle_system.render(renderer);
+        // Flush lines before drawing particles to avoid state leaks
+        renderer.flush();
+
+        if let Some(emitter) = &mut self.resource.emitter {
+            emitter.draw(renderer, self.resource.dt);
+        }
     }
 }

@@ -35,11 +35,54 @@ async function main() {
     // Expose view for debugging
     (window as any).monitorView = view;
 
+    // Load Resource Pack
+    async function loadResourcePack() {
+      console.log("Loading resource pack...");
+      const files = [
+        "info.yml",
+        "click.png",
+        "click_mh.png",
+        "drag.png",
+        "drag_mh.png",
+        "flick.png",
+        "flick_mh.png",
+        "hold.png",
+        "hold_mh.png",
+        "hit_fx.png",
+      ];
+
+      const fileMap: Record<string, Uint8Array> = {};
+
+      try {
+        await Promise.all(
+          files.map(async (file) => {
+            const resp = await fetch(`/assets/skin/${file}`);
+            if (!resp.ok) {
+              throw new Error(`Failed to fetch ${file}: ${resp.statusText}`);
+            }
+            const buf = await resp.arrayBuffer();
+            fileMap[file] = new Uint8Array(buf);
+          }),
+        );
+
+        console.log("Resource pack files fetched. Loading into WASM...");
+        await view.load_resource_pack(fileMap);
+        console.log("Resource pack loaded successfully.");
+      } catch (e) {
+        console.error("Failed to load resource pack:", e);
+      }
+    }
+
+    // Start loading resource pack in background
+    loadResourcePack();
+
     // Chart Loading Logic
     const loadBtn = document.getElementById("parse-btn");
     const chartIdInput = document.getElementById(
       "chart-id",
     ) as HTMLInputElement;
+
+    let isLoading = false;
 
     if (loadBtn && chartIdInput) {
       loadBtn.onclick = async () => {
@@ -50,6 +93,7 @@ async function main() {
         }
 
         if (statusEl) statusEl.innerText = `Loading Chart ${id}...`;
+        isLoading = true;
 
         try {
           await view.load_chart(id);
@@ -59,21 +103,24 @@ async function main() {
           console.error("Failed to load chart:", e);
           if (statusEl) statusEl.innerText = `Error loading chart ${id}`;
           alert(`Failed to load chart: ${e}`);
+        } finally {
+          isLoading = false;
+          // Force a resize/render after loading to ensure valid state
+          resize();
         }
       };
     }
 
-    let successCount = 0;
     let errorCount = 0;
 
     function renderLoop() {
+      if (isLoading) {
+        requestAnimationFrame(renderLoop);
+        return;
+      }
       try {
         view.resize(canvas.width, canvas.height);
         view.render();
-        successCount++;
-        if (successCount % 60 === 0) {
-          console.log("Render success", successCount);
-        }
       } catch (e) {
         errorCount++;
         if (errorCount % 60 === 0) {

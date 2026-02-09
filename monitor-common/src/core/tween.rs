@@ -354,6 +354,10 @@ impl Tweenable for f32 {
     fn tween(a: &Self, b: &Self, t: f32) -> Self {
         a + (b - a) * t
     }
+
+    fn add(a: &Self, b: &Self) -> Self {
+        a + b
+    }
 }
 
 impl Tweenable for Vector {
@@ -374,6 +378,10 @@ impl Tweenable for Color {
             f32::tween(&x.b, &y.b, t),
             f32::tween(&x.a, &y.a, t),
         )
+    }
+
+    fn add(x: &Self, y: &Self) -> Self {
+        Self::new(x.r + y.r, x.g + y.g, x.b + y.b, x.a + y.a)
     }
 }
 

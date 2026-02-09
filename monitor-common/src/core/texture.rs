@@ -22,4 +22,8 @@ impl Texture {
     pub fn decode(&self) -> Result<DynamicImage, ImageError> {
         image::load_from_memory_with_format(&self.data, ImageFormat::Png)
     }
+
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
 }

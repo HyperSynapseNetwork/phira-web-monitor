@@ -1,5 +1,4 @@
 use crate::engine::{chart::ChartRenderer, resource::Resource};
-use crate::renderer::Renderer;
 use monitor_common::core::Chart;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
@@ -21,14 +20,10 @@ macro_rules! console_log {
 }
 
 #[wasm_bindgen]
-pub struct Monitor {
-    // Registry of views if we support multiple (optional for now)
-    views: HashMap<i32, MonitorView>,
-}
+pub struct Monitor {}
 
 #[wasm_bindgen]
 pub struct MonitorView {
-    id: i32,
     renderer: renderer::Renderer,
     chart_renderer: ChartRenderer,
     start_time: Option<f64>,
@@ -40,9 +35,7 @@ impl Monitor {
     pub fn new() -> Monitor {
         console_error_panic_hook::set_once();
         console_log!("Monitor Client Initialized");
-        Monitor {
-            views: HashMap::new(),
-        }
+        Monitor {}
     }
 
     pub fn monitor(&mut self, user_id: i32, canvas_id: String) -> Result<MonitorView, JsValue> {
@@ -85,7 +78,6 @@ impl Monitor {
         let chart_renderer = ChartRenderer::new(chart, resource);
 
         Ok(MonitorView {
-            id: user_id,
             renderer,
             chart_renderer,
             start_time: None,
@@ -104,10 +96,15 @@ impl MonitorView {
         // World height is 2.0 / aspect
         // Y-axis is flipped (positive Y is down) to match Phira/RPE
         let aspect = self.chart_renderer.resource.aspect_ratio;
+        // Use isotropic scaling (like Phira/prpr).
+        // World width is 2.0 (-1.0 to 1.0)
+        // World height is 2.0 / aspect (-1.0/aspect to 1.0/aspect)
+        // NDC Y = World Y * aspect.
+        let y_scale = aspect;
+
         self.renderer.set_projection(&[
             1.0, // x scale (maps [-1, 1] to [-1, 1])
-            0.0, 0.0, 0.0, 0.0,
-            -aspect, // y scale (maps [-1/aspect, 1/aspect] to [-1, 1], flipped)
+            0.0, 0.0, 0.0, 0.0, y_scale, // y scale
             0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ]);
 
@@ -154,13 +151,80 @@ impl MonitorView {
             .deserialize(&vec)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse chart: {}", e)))?;
 
+        // Preserve existing resource pack if any
+        let existing_pack = self.chart_renderer.resource.res_pack.take();
+
         // Re-initialize resource and renderer
-        // Note: In real app we might want to preserve some resources or reuse them
-        let mut resource = Resource::new(self.renderer.context.width, self.renderer.context.height);
-        resource.load_defaults(&self.renderer.context)?;
-        resource.load_defaults(&self.renderer.context)?;
+        let renderer = &self.renderer; // Borrow renderer for context
+        let mut resource = Resource::new(renderer.context.width, renderer.context.height);
+        resource.load_defaults(&renderer.context)?;
+
+        // Restore resource pack if we had one (and it wasn't just the default fallback, or even if it was)
+        // Ideally we check if it's the fallback, but simply restoring the last active one is usually what we want
+        // because loadResourcePack updates the active one.
+        if let Some(pack) = existing_pack {
+            if pack.info.name != "fallback" {
+                resource
+                    .set_pack(&renderer.context, pack)
+                    .map_err(|e| JsValue::from_str(&format!("Failed to restore pack: {}", e)))?;
+            }
+        }
+
+        // Load textures from chart
+        use monitor_common::core::JudgeLineKind;
+        for (i, line) in chart.lines.iter().enumerate() {
+            if let JudgeLineKind::Texture(tex, _) = &line.kind {
+                console_log!("Loading texture for line {}", i);
+                match crate::renderer::Texture::load_from_bytes(&renderer.context, tex.data()).await
+                {
+                    Ok(texture) => {
+                        resource.line_textures.insert(i, texture);
+                    }
+                    Err(e) => {
+                        console_log!("Failed to load texture for line {}: {:?}", i, e);
+                    }
+                }
+            }
+        }
+
+        // Also check if audio should be loaded (TODO)
+
         self.chart_renderer = ChartRenderer::new(chart, resource);
         self.start_time = None;
+
+        Ok(())
+    }
+
+    pub async fn load_resource_pack(&mut self, files: js_sys::Object) -> Result<(), JsValue> {
+        let entries = js_sys::Object::entries(&files);
+        let mut file_map = HashMap::new();
+
+        for i in 0..entries.length() {
+            let entry = entries.get(i);
+            let entry_array = js_sys::Array::from(&entry);
+            let key = entry_array
+                .get(0)
+                .as_string()
+                .ok_or("Invalid key in file map")?;
+            let value = entry_array.get(1);
+            let uint8_array = js_sys::Uint8Array::new(&value);
+            let bytes = uint8_array.to_vec();
+            file_map.insert(key, bytes);
+        }
+
+        console_log!("Loading resource pack with {} files", file_map.len());
+
+        use crate::engine::resource::ResourcePack;
+        let res_pack = ResourcePack::load(&self.renderer.context, file_map)
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Failed to load resource pack: {:?}", e)))?;
+
+        console_log!("Resource pack loaded: {}", res_pack.info.name);
+
+        self.chart_renderer
+            .resource
+            .set_pack(&self.renderer.context, res_pack)
+            .map_err(|e| JsValue::from_str(&format!("Failed to set resource pack: {}", e)))?;
 
         Ok(())
     }

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 static NEXT_TEXTURE_ID: AtomicU32 = AtomicU32::new(1);
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Texture {
     pub texture: WebGlTexture,
     pub width: u32,
@@ -111,6 +111,7 @@ impl Texture {
             .bind_texture(WebGl2RenderingContext::TEXTURE_2D, Some(&texture));
 
         // Use standard texImage2D with HtmlImageElement
+        // Phira/Macroquad keeps V=0 at the Top.
         // Note: web-sys generates `tex_image_2d_with_u32_and_u32_and_html_image_element` for the overloaded signature
         // void texImage2D(GLenum target, GLint level, GLenum internalformat, GLenum format, GLenum type, HTMLImageElement? pixels);
         ctx.gl
@@ -144,11 +145,30 @@ impl Texture {
             WebGl2RenderingContext::CLAMP_TO_EDGE as i32,
         );
 
+        ctx.gl.generate_mipmap(WebGl2RenderingContext::TEXTURE_2D);
+
         Ok(Texture {
             texture,
             width: image.width(),
             height: image.height(),
             id: Self::next_id(),
         })
+    }
+
+    pub async fn load_from_bytes(ctx: &GlContext, bytes: &[u8]) -> Result<Texture, JsValue> {
+        let array = js_sys::Uint8Array::from(bytes);
+        let blob_parts = js_sys::Array::new();
+        blob_parts.push(&array);
+        let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(
+            &blob_parts,
+            web_sys::BlobPropertyBag::new().type_("image/png"),
+        )?;
+        let url = web_sys::Url::create_object_url_with_blob(&blob)?;
+
+        let texture = Self::load(ctx, &url).await?;
+
+        web_sys::Url::revoke_object_url(&url)?;
+
+        Ok(texture)
     }
 }

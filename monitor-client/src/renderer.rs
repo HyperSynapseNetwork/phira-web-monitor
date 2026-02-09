@@ -2,6 +2,7 @@ use wasm_bindgen::prelude::*;
 
 mod batch;
 mod context;
+pub mod particle;
 mod shader;
 pub mod text;
 mod texture;
@@ -21,6 +22,8 @@ pub struct Renderer {
     pub batcher: Batcher,
     #[wasm_bindgen(skip)]
     pub white_texture: Texture,
+    #[wasm_bindgen(skip)]
+    pub projection: [f32; 16],
 }
 
 impl Renderer {
@@ -28,6 +31,12 @@ impl Renderer {
         let context = GlContext::new(canvas_id)?;
         let mut shader_manager = ShaderManager::new(&context);
         shader_manager.init_defaults(&context)?;
+
+        context.gl.enable(web_sys::WebGl2RenderingContext::BLEND);
+        context.gl.blend_func(
+            web_sys::WebGl2RenderingContext::SRC_ALPHA,
+            web_sys::WebGl2RenderingContext::ONE_MINUS_SRC_ALPHA,
+        );
 
         let batcher = Batcher::new(&context)?;
 
@@ -39,6 +48,9 @@ impl Renderer {
             shader_manager,
             batcher,
             white_texture,
+            projection: [
+                1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+            ],
         })
     }
 
@@ -55,6 +67,7 @@ impl Renderer {
     }
 
     pub fn set_projection(&mut self, matrix: &[f32]) {
+        self.projection.copy_from_slice(matrix);
         self.shader_manager.use_program(&self.context, "default");
         self.shader_manager
             .set_uniform_matrix4fv(&self.context, "u_projection", matrix);

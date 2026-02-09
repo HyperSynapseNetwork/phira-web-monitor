@@ -27,7 +27,8 @@ pub use color::{colors, Color};
 
 mod chart;
 pub use chart::{
-    Chart, GifFrames, HitSound, HitSoundMap, JudgeLine, JudgeLineKind, Note, NoteKind, UIElement,
+    Chart, ChartSettings, GifFrames, HitSound, HitSoundMap, JudgeLine, JudgeLineKind, Note,
+    NoteKind, UIElement,
 };
 
 mod texture;

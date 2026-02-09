@@ -1,5 +1,3 @@
-use std::fmt::format;
-
 use super::context::GlContext;
 use super::texture::Texture;
 use wasm_bindgen::prelude::*;
@@ -118,6 +116,10 @@ impl Batcher {
         }
     }
 
+    pub fn invalidate_texture_cache(&mut self) {
+        self.active_texture_id = None;
+    }
+
     pub fn draw_rect(
         &mut self,
         ctx: &GlContext,
@@ -174,16 +176,15 @@ impl Batcher {
         }
 
         let coords = [
-            (x, y, u, v),                   // 0
-            (x + w, y, u + uw, v),          // 1
-            (x + w, y + h, u + uw, v + uh), // 2
-            (x, y + h, u, v + uh),          // 3
+            (x, y, u, v + uh),          // 0: Bottom-Left
+            (x + w, y, u + uw, v + uh), // 1: Bottom-Right
+            (x + w, y + h, u + uw, v),  // 2: Top-Right
+            (x, y + h, u, v),           // 3: Top-Left
         ];
 
         for (vx, vy, vu, vv) in coords {
             let tx = model[0] * vx + model[4] * vy + model[12];
             let ty = model[1] * vx + model[5] * vy + model[13];
-            // web_sys::console::log_1(&format!("({}, {})", tx, ty).into());
 
             self.vertices
                 .extend_from_slice(&[tx, ty, vu, vv, r, g, b, a]);
