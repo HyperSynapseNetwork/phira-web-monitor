@@ -10,9 +10,9 @@ const FLOATS_PER_VERTEX: usize = 8; // x, y, u, v, r, g, b, a
 
 pub struct Batcher {
     vertices: Vec<f32>,
-    indices: Vec<u16>,
+    _indices: Vec<u16>,
     vbo: WebGlBuffer,
-    ebo: WebGlBuffer,
+    _ebo: WebGlBuffer,
     vao: WebGlVertexArrayObject,
     index_count: i32,
     active_texture_id: Option<u32>,
@@ -98,9 +98,9 @@ impl Batcher {
 
         Ok(Self {
             vertices: Vec::with_capacity(MAX_QUADS * VERTICES_PER_QUAD * FLOATS_PER_VERTEX),
-            indices,
+            _indices: indices,
             vbo,
-            ebo,
+            _ebo: ebo,
             vao,
             index_count: 0,
             active_texture_id: None,
@@ -150,7 +150,7 @@ impl Batcher {
             self.vertices
                 .extend_from_slice(&[tx, ty, 0.0, 0.0, r, g, b, a]);
         }
-
+        // web_sys::console::log_1(&format!("Batcher added quad at {},{} ({}x{})", x, y, w, h).into());
         self.index_count += INDICES_PER_QUAD as i32;
     }
 
@@ -189,7 +189,7 @@ impl Batcher {
             self.vertices
                 .extend_from_slice(&[tx, ty, vu, vv, r, g, b, a]);
         }
-
+        // web_sys::console::log_1(&format!("Batcher added texture quad at {},{} ({}x{})", x, y, w, h).into());
         self.index_count += INDICES_PER_QUAD as i32;
     }
 

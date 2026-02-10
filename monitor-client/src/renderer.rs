@@ -43,7 +43,7 @@ impl Renderer {
         // Create and bind default white texture to unit 0
         let white_texture = Texture::create_white_pixel(&context)?;
 
-        Ok(Self {
+        let mut renderer = Self {
             context,
             shader_manager,
             batcher,
@@ -51,7 +51,12 @@ impl Renderer {
             projection: [
                 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
             ],
-        })
+        };
+        // Upload initial projection
+        renderer.set_projection(&[
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ]);
+        Ok(renderer)
     }
 
     pub fn clear(&self) {
@@ -64,6 +69,13 @@ impl Renderer {
 
     pub fn begin_frame(&mut self) {
         self.shader_manager.use_program(&self.context, "default");
+        // Ensure u_texture is set to unit 0
+        let loc = self
+            .shader_manager
+            .get_uniform_location(&self.context, "default", "u_texture");
+        if let Some(loc) = loc {
+            self.context.gl.uniform1i(Some(&loc), 0);
+        }
     }
 
     pub fn set_projection(&mut self, matrix: &[f32]) {

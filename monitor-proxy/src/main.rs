@@ -5,6 +5,7 @@
 //! 2. Server-side chart parsing (download -> unzip -> parse -> bincode)
 //! 3. WebSocket proxy for multiplayer connections (TODO)
 
+use anyhow::Context;
 use axum::{
     extract::Path,
     http::{HeaderValue, Method, StatusCode},
@@ -12,7 +13,8 @@ use axum::{
     routing::get,
     Router,
 };
-use parse::rpe::{self, ResourceLoader};
+use monitor_common::core::{ChartFormat, ChartInfo};
+use parse::{pbc, pec, pgr, rpe, ResourceLoader};
 use std::io::{Cursor, Read};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -133,47 +135,84 @@ async fn process_chart(id: &str) -> anyhow::Result<Vec<u8>> {
     }
     let zip_bytes = file_resp.bytes().await?.to_vec();
 
-    // 3. Unzip and find chart.json
+    // 3. Unzip and find chart file
     let reader = Cursor::new(zip_bytes.clone());
     let mut zip = zip::ZipArchive::new(reader)?;
 
-    let mut chart_json = String::new();
-    let mut found = false;
-    let len = zip.len();
+    let mut info: ChartInfo = serde_yaml::from_reader(
+        zip.by_path("info.yml")
+            .with_context(|| "Cannot find info.yml in chart zip")?,
+    )
+    .with_context(|| "Failed to parse info.yml")?;
 
-    for i in 0..len {
-        let mut file = zip.by_index(i)?;
-        if file.name().ends_with(".json") && (file.name().contains("chart") || len == 1 || !found) {
-            chart_json.clear();
-            file.read_to_string(&mut chart_json)?;
-            found = true;
-            // Prefer file named "chart.json" or similar, but keep first json found as fallback
-            if file.name().contains("chart") {
-                break;
+    let mut chart_bytes = Vec::new();
+    zip.by_path(&info.chart)
+        .with_context(|| "Cannot find chart file")?
+        .read_to_end(&mut chart_bytes)
+        .with_context(|| "Failed to read chart file")?;
+
+    let extra_json = zip
+        .by_path("extra.json")
+        .and_then(|mut file| {
+            let mut s = String::new();
+            file.read_to_string(&mut s)?;
+            Ok(Some(s))
+        })
+        .unwrap_or(None);
+
+    // 4. Detect format and parse
+    let chart_text = String::from_utf8(chart_bytes.clone());
+    info.format = info.format.or_else(|| {
+        if let Ok(text) = &chart_text {
+            if text.starts_with("{") {
+                if text.contains("META") {
+                    log::info!("Detected RPE chart");
+                    Some(ChartFormat::Rpe)
+                } else {
+                    log::info!("Detected PGR chart");
+                    Some(ChartFormat::Pgr)
+                }
+            } else {
+                log::info!("Detected PEC chart");
+                Some(ChartFormat::Pec)
             }
+        } else {
+            log::info!("Detected PBC chart");
+            Some(ChartFormat::Pbc)
         }
+    });
+
+    let chart = match info.format.clone().unwrap() {
+        ChartFormat::Rpe => {
+            let reader = Cursor::new(zip_bytes);
+            let archive = Arc::new(Mutex::new(zip::ZipArchive::new(reader)?));
+            let mut loader = ZipLoader { archive };
+            rpe::parse_rpe(&chart_text?, &mut loader)
+                .await
+                .map_err(|e| anyhow::anyhow!("RPE parse error: {}", e))?
+        }
+        ChartFormat::Pgr => pgr::parse_pgr(&chart_text?)
+            .await
+            .map_err(|e| anyhow::anyhow!("PGR parse error: {}", e))?,
+        ChartFormat::Pec => pec::parse_pec(&chart_text?)
+            .await
+            .map_err(|e| anyhow::anyhow!("PEC parse error: {}", e))?,
+        ChartFormat::Pbc => pbc::parse_pbc(&chart_bytes)
+            .await
+            .map_err(|e| anyhow::anyhow!("PBC parse error: {}", e))?,
+    };
+
+    if let Some(_) = extra_json {
+        // TODO: implement extra.json parsing
+        log::warn!("Ignoring extra.json: Not implemented yet.");
     }
-
-    if !found {
-        return Err(anyhow::anyhow!("No JSON chart file found in zip"));
-    }
-
-    // 4. Parse RPE chart
-    let reader = Cursor::new(zip_bytes);
-    let archive = Arc::new(Mutex::new(zip::ZipArchive::new(reader)?));
-    let mut loader = ZipLoader { archive };
-
-    let chart = rpe::parse_rpe(&chart_json, &mut loader)
-        .await
-        .map_err(|e| anyhow::anyhow!("RPE parse error: {}", e))?;
 
     // 5. Serialize to bincode
     use bincode::Options;
-    let encoded = bincode::options()
+    bincode::options()
         .with_varint_encoding()
-        .serialize(&chart)?;
-
-    Ok(encoded)
+        .serialize(&(info, chart))
+        .with_context(|| "Failed to serialize chart")
 }
 
 fn generate_test_chart() -> anyhow::Result<Vec<u8>> {
@@ -220,6 +259,7 @@ fn generate_test_chart() -> anyhow::Result<Vec<u8>> {
         ..Default::default()
     });
 
+    let info = ChartInfo::default();
     let chart = Chart {
         offset: 0.0,
         lines: vec![line],
@@ -229,6 +269,6 @@ fn generate_test_chart() -> anyhow::Result<Vec<u8>> {
     use bincode::Options;
     let encoded = bincode::options()
         .with_varint_encoding()
-        .serialize(&chart)?;
+        .serialize(&(info, chart))?;
     Ok(encoded)
 }

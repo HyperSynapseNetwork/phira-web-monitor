@@ -10,6 +10,7 @@ pub struct Glyph {
     pub advance: f32,
 }
 
+#[derive(Clone)]
 pub struct SpriteFont {
     pub texture: Texture,
     pub map: HashMap<char, Glyph>,
@@ -72,6 +73,48 @@ impl SpriteFont {
             .sum()
     }
 
+    pub fn draw_text_color(
+        &self,
+        renderer: &mut Renderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        size: f32,
+        align: f32,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+        model: &[f32; 16],
+    ) {
+        if text.is_empty() {
+            return;
+        }
+
+        let total_width = self.width(text, size);
+        let mut cursor_x = x - total_width * align;
+        let cursor_y = y;
+
+        renderer.set_texture(&self.texture);
+
+        for c in text.chars() {
+            if let Some(glyph) = self.map.get(&c) {
+                let w = glyph.w;
+                let h = glyph.h;
+
+                let scale = size / self.line_height;
+                let draw_w = glyph.advance * scale;
+                let draw_h = size;
+
+                renderer.draw_texture_rect(
+                    cursor_x, cursor_y, draw_w, draw_h, glyph.x, glyph.y, w, h, r, g, b, a, model,
+                );
+
+                cursor_x += draw_w;
+            }
+        }
+    }
+
     pub fn draw_text(
         &self,
         renderer: &mut Renderer,
@@ -80,49 +123,8 @@ impl SpriteFont {
         y: f32,
         size: f32,
         align: f32,
+        model: &[f32; 16],
     ) {
-        // align: 0.0 = left, 0.5 = center, 1.0 = right
-        if text.is_empty() {
-            return;
-        }
-
-        let total_width = self.width(text, size);
-
-        let mut cursor_x = x - total_width * align;
-        let cursor_y = y;
-
-        renderer.set_texture(&self.texture);
-
-        for c in text.chars() {
-            if let Some(glyph) = self.map.get(&c) {
-                let w = glyph.w; // UV width
-                let h = glyph.h; // UV height
-
-                let scale = size / self.line_height;
-                let draw_w = glyph.advance * scale;
-                let draw_h = size; // self.line_height * scale
-
-                renderer.draw_texture_rect(
-                    cursor_x,
-                    cursor_y,
-                    draw_w,
-                    draw_h,
-                    glyph.x,
-                    glyph.y,
-                    w,
-                    h,
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0,
-                    &[
-                        1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
-                        1.0,
-                    ],
-                );
-
-                cursor_x += draw_w;
-            }
-        }
+        self.draw_text_color(renderer, text, x, y, size, align, 1.0, 1.0, 1.0, 1.0, model);
     }
 }

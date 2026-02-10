@@ -1,32 +1,24 @@
 use core::f32;
 
 use crate::engine::note::{RenderConfig, draw_note};
-use crate::engine::resource::Resource;
+use crate::engine::resource::{Resource, Vector};
 use crate::renderer::Renderer;
-use monitor_common::core::{ChartSettings, JudgeLine, JudgeLineKind};
-use nalgebra::{Matrix3, Rotation2, Vector2};
+use monitor_common::core::{ChartSettings, JudgeLine, JudgeLineKind, Matrix};
 
 pub fn draw_line(
     res: &mut Resource,
     line: &JudgeLine,
+    length: f32,
     renderer: &mut Renderer,
     line_index: usize,
     settings: &ChartSettings,
+    world_matrix: Matrix,
 ) {
-    let translation = line.object.now_translation(res.aspect_ratio);
-    // Convert Vector to Vector2 (MonitorCommon Vector is Vector2<f32>)
-    let translation = Vector2::new(translation.x, translation.y);
-    let rot = line.object.rotation.now_opt().unwrap_or(0.0);
-    let rotation = Rotation2::new(rot.to_radians());
-
-    let mut transform = Matrix3::identity();
-    transform
-        .fixed_view_mut::<2, 2>(0, 0)
-        .copy_from(rotation.matrix());
-    transform[(0, 2)] = translation.x;
-    transform[(1, 2)] = translation.y;
-
-    res.with_model(transform, |res| {
+    // TODO: support attach_ui
+    if let Some(_) = &line.attach_ui {
+        return;
+    }
+    res.with_model(world_matrix, |res| {
         let alpha = line.object.alpha.now_opt().unwrap_or(1.0);
 
         // PE Alpha Extension Logic (Negative Alpha)
@@ -61,14 +53,13 @@ pub fn draw_line(
 
         match &line.kind {
             JudgeLineKind::Normal => {
-                let len = 6.0;
                 let thickness = 0.01;
 
                 renderer.set_texture(&renderer.white_texture.clone());
                 renderer.draw_rect(
-                    -len / 2.0,
+                    -length / 2.0,
                     -thickness / 2.0,
-                    len,
+                    length,
                     thickness,
                     color.r,
                     color.g,
@@ -76,14 +67,24 @@ pub fn draw_line(
                     alpha * color.a,
                     &res.get_gl_matrix(),
                 );
+                if f32::abs(alpha * color.a) > 0.001 {
+                    web_sys::console::log_1(
+                        &format!(
+                            "DEBUG Line {}: alpha={:.3}, color=({:.2},{:.2},{:.2},{:.2})",
+                            line_index, alpha, color.r, color.g, color.b, color.a
+                        )
+                        .into(),
+                    );
+                }
             }
             JudgeLineKind::Texture(_, _) => {
                 if let Some(texture) = res.line_textures.get(&line_index) {
                     let scale_x = line.object.scale.x.now_opt().unwrap_or(1.0);
                     let scale_y = line.object.scale.y.now_opt().unwrap_or(1.0);
 
-                    let w = scale_x;
-                    let h = scale_y * (texture.height as f32 / texture.width as f32);
+                    // Note: RPE scale (2/1350) is already included in the animation scale from the proxy
+                    let w = scale_x * (texture.width as f32);
+                    let h = scale_y * (texture.height as f32);
 
                     renderer.set_texture(texture);
                     renderer.draw_texture_rect(
@@ -103,7 +104,70 @@ pub fn draw_line(
                     );
                 }
             }
-            _ => {}
+            JudgeLineKind::TextureGif(_, gif, _) => {
+                if let Some(frames) = res.line_gif_textures.get(&line_index) {
+                    let time = res.time * 1000.0; // convert to ms
+                    let total_time = gif.total_time as f32;
+                    let current_time = if total_time > 0.0 {
+                        time % total_time
+                    } else {
+                        0.0
+                    };
+
+                    let mut frame_index = 0;
+                    for (i, (frame_time, _)) in gif.frames.iter().enumerate() {
+                        if (*frame_time as f32) > current_time {
+                            break;
+                        }
+                        frame_index = i;
+                    }
+
+                    if let Some(texture) = frames.get(frame_index) {
+                        let scale_x = line.object.scale.x.now_opt().unwrap_or(1.0);
+                        let scale_y = line.object.scale.y.now_opt().unwrap_or(1.0);
+
+                        // Note: RPE scale (2/1350) is already included in the animation scale from the proxy
+                        let w = scale_x * (texture.width as f32);
+                        let h = scale_y * (texture.height as f32);
+
+                        renderer.set_texture(texture);
+                        renderer.draw_texture_rect(
+                            -w / 2.0,
+                            -h / 2.0,
+                            w,
+                            h,
+                            0.0,
+                            0.0,
+                            1.0,
+                            1.0,
+                            color.r,
+                            color.g,
+                            color.b,
+                            alpha * color.a,
+                            &res.get_gl_matrix(),
+                        );
+                    }
+                }
+            }
+            JudgeLineKind::Text(anim) => {
+                if let Some(font) = &res.font {
+                    let text = anim.now_opt().unwrap_or_default();
+                    let rpe_scale = 2.0 / 1350.0;
+
+                    font.draw_text(
+                        renderer,
+                        &text,
+                        0.0,
+                        0.0,
+                        60.0 * rpe_scale,
+                        0.5,
+                        &res.get_gl_matrix(),
+                    );
+                }
+            }
+            JudgeLineKind::Paint(_) => {
+                // TODO: Implement Paint rendering
+            }
         }
 
         let height_val = line.height.now_opt().unwrap_or(0.0);
@@ -117,8 +181,19 @@ pub fn draw_line(
         };
 
         // Draw notes
-        for note in &line.notes {
+        // Pass 1: Above notes
+        for note in line.notes.iter().filter(|n| n.above) {
             draw_note(res, note, line, &config, renderer);
         }
+
+        // Pass 2: Below notes (mirrored Y)
+        res.with_model(
+            Matrix::identity().append_nonuniform_scaling(&Vector::new(1.0, -1.0)),
+            |res| {
+                for note in line.notes.iter().filter(|n| !n.above) {
+                    draw_note(res, note, line, &config, renderer);
+                }
+            },
+        );
     });
 }

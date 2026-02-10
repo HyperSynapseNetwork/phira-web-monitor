@@ -90,10 +90,6 @@ impl NoteStyle {
         let ey = self.hold_atlas.0 as f32 / self.hold.height as f32;
         Rect::new(0., 0., 1., ey)
     }
-
-    pub fn hold_ratio(&self) -> f32 {
-        self.hold.height as f32 / self.hold.width as f32
-    }
 }
 
 #[derive(Deserialize)]
@@ -151,6 +147,7 @@ pub struct ResourcePack {
     pub note_style: NoteStyle,
     pub note_style_mh: NoteStyle,
     pub hit_fx: Texture,
+    pub font: Option<crate::renderer::text::SpriteFont>,
 }
 
 impl ResourcePack {
@@ -203,18 +200,27 @@ impl ResourcePack {
                 Texture::create_solid_color(ctx, 64, 64, [255, 255, 255, 255]).unwrap()
             });
 
+        let font = if files.contains_key("font.png") {
+            let tex = load_tex(ctx, &files, "font.png").await?;
+            let mut font = crate::renderer::text::SpriteFont::new(tex, 60.0);
+            font.load_grid("0123456789.", 11, 1, 60.0, 60.0);
+            Some(font)
+        } else {
+            None
+        };
+
         Ok(Self {
             info,
             note_style,
             note_style_mh,
             hit_fx,
+            font,
         })
     }
 }
 
 pub struct Resource {
     pub model_stack: Vec<Matrix>,
-    pub textures: HashMap<u32, Texture>,
     pub time: f32,
     pub dt: f32,
     pub width: u32,
@@ -224,7 +230,9 @@ pub struct Resource {
     pub note_width: f32,
     pub note_scale: f32,
     pub line_textures: HashMap<usize, Texture>,
+    pub line_gif_textures: HashMap<usize, Vec<Texture>>,
     pub emitter: Option<ParticleEmitter>,
+    pub font: Option<crate::renderer::text::SpriteFont>,
 }
 
 pub struct ParticleEmitter {
@@ -344,7 +352,6 @@ impl Resource {
     pub fn new(width: u32, height: u32) -> Self {
         Self {
             model_stack: vec![Matrix::identity()],
-            textures: HashMap::new(),
             time: 0.0,
             dt: 0.0,
             width,
@@ -354,7 +361,9 @@ impl Resource {
             note_width: monitor_common::core::NOTE_WIDTH_RATIO_BASE,
             note_scale: 1.0,
             line_textures: HashMap::new(),
+            line_gif_textures: HashMap::new(),
             emitter: None,
+            font: None,
         }
     }
 
@@ -402,6 +411,7 @@ impl Resource {
             note_style: style,
             note_style_mh: style_mh,
             hit_fx: crate::renderer::Texture::create_solid_color(ctx, 1, 1, [255, 255, 255, 255])?,
+            font: None,
         };
 
         self.set_pack(ctx, res_pack)?;
@@ -415,6 +425,7 @@ impl Resource {
         pack: ResourcePack,
     ) -> Result<(), String> {
         self.emitter = Some(ParticleEmitter::new(ctx, &pack, self.note_scale, false)?);
+        self.font = pack.font.clone();
         self.res_pack = Some(pack);
         Ok(())
     }

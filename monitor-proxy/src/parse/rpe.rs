@@ -3,7 +3,7 @@
 //! Ported from prpr/src/parse/rpe.rs for the web monitor.
 //! Parses the JSON chart format used by RPE (Re:PhiEdit).
 
-use super::{process_lines, RPE_TWEEN_MAP};
+use super::{process_lines, ResourceLoader, RPE_TWEEN_MAP};
 use monitor_common::core::{
     colors::WHITE, Anim, AnimFloat, AnimVector, AudioClip, BezierTween, BpmList, Chart, Color,
     CtrlObject, GifFrames, HitSound, HitSoundMap, JudgeLine, JudgeLineKind, Keyframe, Note,
@@ -13,19 +13,11 @@ use monitor_common::core::{
 use anyhow::{bail, Context, Result};
 use image::{codecs::gif, AnimationDecoder, DynamicImage};
 use serde::Deserialize;
-use std::{collections::HashMap, future::Future, io::Cursor, pin::Pin, time::Duration};
+use std::{collections::HashMap, io::Cursor, time::Duration};
 
 pub const RPE_WIDTH: f32 = 1350.;
 pub const RPE_HEIGHT: f32 = 900.;
 const SPEED_RATIO: f32 = 10. / 45. / HEIGHT_RATIO;
-
-/// Resource loader trait to abstract file system
-pub trait ResourceLoader: Send + Sync {
-    fn load_file<'a>(
-        &'a mut self,
-        path: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>>> + Send + 'a>>;
-}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -890,6 +882,7 @@ pub async fn parse_rpe(source: &str, fs: &mut dyn ResourceLoader) -> Result<Char
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::{future::Future, pin::Pin};
 
     struct MockLoader;
     impl ResourceLoader for MockLoader {

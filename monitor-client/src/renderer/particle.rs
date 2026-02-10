@@ -146,7 +146,6 @@ struct CpuParticle {
     angular_velocity: f32,
     lived: f32,
     lifetime: f32,
-    frame: u16,
     initial_size: f32,
     color: Color,
 
@@ -488,7 +487,6 @@ impl Emitter {
             angular_velocity,
             lived: 0.0,
             lifetime,
-            frame: 0,
             initial_size: r,
             color: self.config.base_color,
             offset,

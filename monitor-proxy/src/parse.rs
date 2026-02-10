@@ -1,4 +1,20 @@
+pub mod extra;
+pub mod pbc;
+pub mod pec;
+pub mod pgr;
 pub mod rpe;
+
+use anyhow::Result;
+use std::future::Future;
+use std::pin::Pin;
+
+/// Resource loader trait to abstract file system
+pub trait ResourceLoader: Send + Sync {
+    fn load_file<'a>(
+        &'a mut self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>>> + Send + 'a>>;
+}
 
 use monitor_common::core::{easing_from, JudgeLine, TweenId, TweenMajor, TweenMinor};
 use std::cmp::Ordering;

@@ -1,5 +1,5 @@
 use crate::engine::{chart::ChartRenderer, resource::Resource};
-use monitor_common::core::Chart;
+use monitor_common::core::{Chart, ChartInfo};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
@@ -15,6 +15,7 @@ extern "C" {
     fn log(s: &str);
 }
 
+#[macro_export]
 macro_rules! console_log {
     ($($t:tt)*) => (log(&format_args!($($t)*).to_string()))
 }
@@ -50,36 +51,12 @@ impl Monitor {
         // MVP: Initialize with dummy chart
         let mut resource = Resource::new(renderer.context.width, renderer.context.height);
         resource.load_defaults(&renderer.context)?;
-        let mut chart = Chart::default();
-
-        // Add a test JudgeLine
-        use monitor_common::core::{Anim, AnimFloat, AnimVector, JudgeLine, JudgeLineKind, Object};
-        let line = JudgeLine {
-            object: Object {
-                translation: AnimVector::default(),
-                rotation: AnimFloat::default(),
-                scale: AnimVector::default(),
-                alpha: AnimFloat::fixed(1.0),
-            },
-            ctrl_obj: monitor_common::core::CtrlObject::default(),
-            kind: JudgeLineKind::Normal,
-            height: AnimFloat::default(),
-            incline: AnimFloat::default(),
-            notes: Vec::new(),
-            color: Anim::default(),
-            parent: None,
-            z_index: 0,
-            show_below: true,
-            attach_ui: None,
-        };
-
-        chart.lines.push(line);
-
-        let chart_renderer = ChartRenderer::new(chart, resource);
+        let info = ChartInfo::default();
+        let chart = Chart::default();
 
         Ok(MonitorView {
             renderer,
-            chart_renderer,
+            chart_renderer: ChartRenderer::new(info, chart, resource),
             start_time: None,
         })
     }
@@ -91,15 +68,7 @@ impl MonitorView {
         self.renderer.clear();
         self.renderer.begin_frame();
 
-        // Calculate and set orthographic projection (Width-normalized)
-        // World width is 2.0 (-1.0 to 1.0)
-        // World height is 2.0 / aspect
-        // Y-axis is flipped (positive Y is down) to match Phira/RPE
         let aspect = self.chart_renderer.resource.aspect_ratio;
-        // Use isotropic scaling (like Phira/prpr).
-        // World width is 2.0 (-1.0 to 1.0)
-        // World height is 2.0 / aspect (-1.0/aspect to 1.0/aspect)
-        // NDC Y = World Y * aspect.
         let y_scale = aspect;
 
         self.renderer.set_projection(&[
@@ -115,8 +84,9 @@ impl MonitorView {
         }
 
         let time = (now - self.start_time.unwrap()) / 1000.0;
+        self.renderer.clear();
+        self.renderer.begin_frame();
         self.chart_renderer.update(time as f32);
-
         self.chart_renderer.render(&mut self.renderer);
         self.renderer.flush();
         Ok(())
@@ -127,7 +97,7 @@ impl MonitorView {
         self.chart_renderer.resize(width, height);
     }
 
-    pub async fn load_chart(&mut self, id: String) -> Result<(), JsValue> {
+    pub async fn load_chart(&mut self, id: String) -> Result<JsValue, JsValue> {
         let window = web_sys::window().ok_or("no window")?;
         let resp_value =
             wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(&format!("/chart/{}", id)))
@@ -146,10 +116,24 @@ impl MonitorView {
         let vec = uint8_array.to_vec();
 
         use bincode::Options;
-        let chart: monitor_common::core::Chart = bincode::options()
+        let (info, mut chart): (ChartInfo, Chart) = bincode::options()
             .with_varint_encoding()
             .deserialize(&vec)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse chart: {}", e)))?;
+
+        // get order
+        chart.order = (0..chart.lines.len()).collect();
+        chart.order.sort_by_key(|&i| chart.lines[i].z_index);
+
+        // Sort notes in each line by time and then by priority (order)
+        for line in &mut chart.lines {
+            line.notes.sort_by(|a, b| {
+                a.time
+                    .partial_cmp(&b.time)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.kind.order().cmp(&b.kind.order()))
+            });
+        }
 
         // Preserve existing resource pack if any
         let existing_pack = self.chart_renderer.resource.res_pack.take();
@@ -173,26 +157,63 @@ impl MonitorView {
         // Load textures from chart
         use monitor_common::core::JudgeLineKind;
         for (i, line) in chart.lines.iter().enumerate() {
-            if let JudgeLineKind::Texture(tex, _) = &line.kind {
-                console_log!("Loading texture for line {}", i);
-                match crate::renderer::Texture::load_from_bytes(&renderer.context, tex.data()).await
-                {
-                    Ok(texture) => {
-                        resource.line_textures.insert(i, texture);
-                    }
-                    Err(e) => {
-                        console_log!("Failed to load texture for line {}: {:?}", i, e);
+            match &line.kind {
+                JudgeLineKind::Texture(tex, _) => {
+                    console_log!("Loading texture for line {}", i);
+                    match crate::renderer::Texture::load_from_bytes(&renderer.context, tex.data())
+                        .await
+                    {
+                        Ok(texture) => {
+                            console_log!(
+                                "Loaded texture for line {}: {}x{}",
+                                i,
+                                texture.width,
+                                texture.height
+                            );
+                            resource.line_textures.insert(i, texture);
+                        }
+                        Err(e) => {
+                            console_log!("Failed to load texture for line {}: {:?}", i, e);
+                        }
                     }
                 }
+                JudgeLineKind::TextureGif(_, frames, _) => {
+                    console_log!("Loading GIF frames for line {}", i);
+                    let mut gl_frames = Vec::new();
+                    for (_time, tex) in &frames.frames {
+                        match crate::renderer::Texture::load_from_bytes(
+                            &renderer.context,
+                            tex.data(),
+                        )
+                        .await
+                        {
+                            Ok(texture) => {
+                                console_log!(
+                                    "Loaded GIF frame for line {}: {}x{}",
+                                    i,
+                                    texture.width,
+                                    texture.height
+                                );
+                                gl_frames.push(texture);
+                            }
+                            Err(e) => {
+                                console_log!("Failed to load GIF frame for line {}: {:?}", i, e);
+                            }
+                        }
+                    }
+                    resource.line_gif_textures.insert(i, gl_frames);
+                }
+                _ => {}
             }
         }
 
         // Also check if audio should be loaded (TODO)
 
-        self.chart_renderer = ChartRenderer::new(chart, resource);
+        self.chart_renderer = ChartRenderer::new(info.clone(), chart, resource);
         self.start_time = None;
 
-        Ok(())
+        serde_wasm_bindgen::to_value(&info)
+            .map_err(|e| JsValue::from_str(&format!("Failed to serialize chart info: {}", e)))
     }
 
     pub async fn load_resource_pack(&mut self, files: js_sys::Object) -> Result<(), JsValue> {
@@ -219,7 +240,17 @@ impl MonitorView {
             .await
             .map_err(|e| JsValue::from_str(&format!("Failed to load resource pack: {:?}", e)))?;
 
-        console_log!("Resource pack loaded: {}", res_pack.info.name);
+        console_log!(
+            "Resource pack loaded: {}\n  Author: {}\n  Description: {}",
+            res_pack.info.name,
+            res_pack.info.author,
+            res_pack.info.description
+        );
+        if res_pack.font.is_some() {
+            console_log!("Resource pack contains a font.");
+        } else {
+            console_log!("Resource pack DOES NOT contain a font.");
+        }
 
         self.chart_renderer
             .resource

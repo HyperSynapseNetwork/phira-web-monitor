@@ -159,16 +159,14 @@ impl Texture {
         let array = js_sys::Uint8Array::from(bytes);
         let blob_parts = js_sys::Array::new();
         blob_parts.push(&array);
-        let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(
-            &blob_parts,
-            web_sys::BlobPropertyBag::new().type_("image/png"),
-        )?;
+        let options = web_sys::BlobPropertyBag::new();
+        options.set_type("image/png");
+
+        let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&blob_parts, &options)?;
         let url = web_sys::Url::create_object_url_with_blob(&blob)?;
 
         let texture = Self::load(ctx, &url).await?;
-
         web_sys::Url::revoke_object_url(&url)?;
-
         Ok(texture)
     }
 }

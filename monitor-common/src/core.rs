@@ -8,7 +8,7 @@ pub const HEIGHT_RATIO: f32 = 0.83175;
 pub const EPS: f32 = 1e-5;
 
 mod anim;
-pub use anim::{Anim, AnimFloat, AnimVector, Keyframe};
+pub use anim::{Anim, AnimFloat, AnimVector, Keyframe, TweenFn};
 
 mod bpm;
 pub use bpm::{BpmList, Triple};
@@ -27,12 +27,12 @@ pub use color::{colors, Color};
 
 mod chart;
 pub use chart::{
-    Chart, ChartSettings, GifFrames, HitSound, HitSoundMap, JudgeLine, JudgeLineKind, Note,
-    NoteKind, UIElement,
+    Chart, ChartFormat, ChartInfo, ChartSettings, GifFrames, HitSound, HitSoundMap, JudgeLine,
+    JudgeLineKind, Note, NoteKind, UIElement,
 };
 
 mod texture;
 pub use texture::Texture;
 
-pub mod audio;
+mod audio;
 pub use audio::AudioClip;

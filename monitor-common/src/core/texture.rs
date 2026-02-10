@@ -8,6 +8,10 @@ pub struct Texture {
 }
 
 impl Texture {
+    pub fn empty() -> Self {
+        Self { data: Vec::new() }
+    }
+
     pub fn new(image: DynamicImage) -> Self {
         let mut cursor = Cursor::new(Vec::new());
         image

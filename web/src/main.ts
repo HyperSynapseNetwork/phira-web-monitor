@@ -96,12 +96,47 @@ async function main() {
         isLoading = true;
 
         try {
-          await view.load_chart(id);
+          const info = (await view.load_chart(id)) as any;
           if (statusEl) statusEl.innerText = `Chart ${id} Loaded`;
-          console.log(`Chart ${id} loaded successfully.`);
+          console.log(`Chart ${id} loaded successfully.`, info);
+
+          const parseResultEl = document.getElementById("parse-result");
+          if (parseResultEl) {
+            parseResultEl.innerText = `Successfully loaded chart: ${info.name}`;
+            parseResultEl.className = "success";
+          }
+
+          const infoCard = document.getElementById("chart-info-details");
+          const nameEl = document.getElementById("info-name");
+          const composerEl = document.getElementById("info-composer");
+          const charterEl = document.getElementById("info-charter");
+          const levelEl = document.getElementById("info-level");
+
+          if (infoCard) infoCard.style.display = "block";
+          if (nameEl) nameEl.innerText = info.name;
+          if (composerEl) composerEl.innerText = info.composer;
+          if (charterEl) charterEl.innerText = info.charter;
+          if (levelEl) levelEl.innerText = info.level;
+
+          const statsCard = document.getElementById("stats");
+          const difficultyEl = document.getElementById("stat-difficulty");
+          const offsetEl = document.getElementById("stat-offset");
+          const formatEl = document.getElementById("stat-format");
+
+          if (statsCard) statsCard.style.display = "grid";
+          if (difficultyEl) difficultyEl.innerText = info.difficulty.toFixed(1);
+          if (offsetEl) offsetEl.innerText = info.offset.toFixed(3);
+          if (formatEl)
+            formatEl.innerText = (info.format || "unknown").toUpperCase();
         } catch (e) {
           console.error("Failed to load chart:", e);
           if (statusEl) statusEl.innerText = `Error loading chart ${id}`;
+
+          const parseResultEl = document.getElementById("parse-result");
+          if (parseResultEl) {
+            parseResultEl.innerText = `Error: ${e}`;
+            parseResultEl.className = "error";
+          }
           alert(`Failed to load chart: ${e}`);
         } finally {
           isLoading = false;

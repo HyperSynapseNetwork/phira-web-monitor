@@ -95,6 +95,7 @@
         color: #4ade80;
       }
       .loading { color: #facc15; }
+      .success { color: #4ade80; }
       .error { color: #f87171; }
       
       .input-group {
@@ -192,28 +193,40 @@
             <button id="parse-btn">Load</button>
           </div>
           <div id="parse-result">Enter an ID to load.</div>
+          <div id="chart-info-details" style="display: none; margin-top: 1rem; font-size: 0.85rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 0.5rem;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+              <span style="color: #94a3b8;">Song:</span>
+              <span id="info-name" style="color: #fff; font-weight: 500;">-</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+              <span style="color: #94a3b8;">Composer:</span>
+              <span id="info-composer" style="color: #fff;">-</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+              <span style="color: #94a3b8;">Charter:</span>
+              <span id="info-charter" style="color: #fff;">-</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+              <span style="color: #94a3b8;">Level:</span>
+              <span id="info-level" style="color: #fff;">-</span>
+            </div>
+          </div>
+
           <div class="stats" id="stats" style="display: none;">
             <div class="stat">
-              <div class="stat-value" id="stat-lines">0</div>
-              <div class="stat-label">Lines</div>
-            </div>
-            <div class="stat">
-              <div class="stat-value" id="stat-notes">0</div>
-              <div class="stat-label">Notes</div>
+              <div class="stat-value" id="stat-difficulty">0</div>
+              <div class="stat-label">Difficulty</div>
             </div>
             <div class="stat">
               <div class="stat-value" id="stat-offset">0</div>
               <div class="stat-label">Offset</div>
             </div>
+            <div class="stat">
+              <div class="stat-value" id="stat-format">RPE</div>
+              <div class="stat-label">Format</div>
+            </div>
           </div>
-          
-          <div style="margin-top: 1rem; text-align: left; background: rgba(0,0,0,0.2); padding: 0.5rem; border-radius: 6px;">
-             <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: #cbd5e1; font-size: 0.9rem;">
-                 <input type="checkbox" id="autoplay-check" checked style="width: auto; margin: 0;">
-                 Enable Autoplay & Effects
-             </label>
-          </div>
-          
+
           <p style="font-size: 0.75rem; color: #666; margin-top: 0.5rem;">
               Tip: Use ID "test" for a local test chart.
           </p>
