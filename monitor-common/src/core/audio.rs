@@ -1,8 +1,13 @@
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use std::{error::Error, fs::File, path::Path};
+use std::{fs::File, path::Path};
 use symphonia::core::{
-    audio::SampleBuffer, codecs::DecoderOptions, formats::FormatOptions, io::MediaSourceStream,
-    meta::MetadataOptions, probe::Hint,
+    audio::SampleBuffer,
+    codecs::DecoderOptions,
+    formats::FormatOptions,
+    io::{MediaSource, MediaSourceStream},
+    meta::MetadataOptions,
+    probe::Hint,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -21,15 +26,14 @@ impl AudioClip {
         }
     }
 
-    /// Load audio from path
-    pub fn load_from_path<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn Error>> {
-        let src = File::open(path.as_ref())?;
-        let mss = MediaSourceStream::new(Box::new(src), Default::default());
-
+    pub fn load_from(source: impl MediaSource + 'static, ext: &str) -> anyhow::Result<Self> {
+        let mss = MediaSourceStream::new(Box::new(source), Default::default());
         let mut hint = Hint::new();
-        if let Some(ext) = path.as_ref().extension().and_then(|e| e.to_str()) {
-            hint.with_extension(ext);
+        hint.with_extension(ext);
+        if ext == "mp3" {
+            hint.mime_type("audio/mpeg");
         }
+
         let probed = symphonia::default::get_probe().format(
             &hint,
             mss,
@@ -38,7 +42,9 @@ impl AudioClip {
         )?;
 
         let mut format = probed.format;
-        let track = format.default_track().ok_or("No default track found")?;
+        let track = format
+            .default_track()
+            .with_context(|| "No default track found")?;
 
         let mut decoder = symphonia::default::get_codecs()
             .make(&track.codec_params, &DecoderOptions::default())?;
@@ -52,7 +58,7 @@ impl AudioClip {
             let packet = match format.next_packet() {
                 Ok(packet) => packet,
                 Err(symphonia::core::errors::Error::IoError(_)) => break,
-                Err(e) => return Err(Box::new(e)),
+                Err(e) => return Err(e.into()),
             };
             if packet.track_id() != track_id {
                 continue;
@@ -73,15 +79,31 @@ impl AudioClip {
                 }
                 Err(symphonia::core::errors::Error::IoError(_)) => break,
                 Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
-                Err(e) => return Err(Box::new(e)),
+                Err(e) => return Err(e.into()),
             }
         }
 
         if all_samples.is_empty() {
-            Err("No audio data decoded".into())
+            Err(anyhow::Error::msg("No audio data decoded"))
         } else {
             Ok(Self::new(all_samples, sample_rate, channel_count))
         }
+    }
+
+    pub fn load_from_bytes(bytes: &[u8], ext: &str) -> anyhow::Result<Self> {
+        let cursor = std::io::Cursor::new(bytes.to_vec());
+        Self::load_from(cursor, ext)
+    }
+
+    /// Load audio from path
+    pub fn load_from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
+        let src = File::open(path.as_ref())?;
+        let ext = path
+            .as_ref()
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("mp3");
+        Self::load_from(src, ext)
     }
 }
 

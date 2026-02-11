@@ -1,8 +1,7 @@
 use crate::engine::resource::Resource;
 use crate::renderer::{Renderer, Texture};
-use monitor_common::core::{JudgeLine, Note, NoteKind};
+use monitor_common::core::{JudgeLine, JudgeStatus, Note, NoteKind};
 use nalgebra::{Matrix3, Vector2};
-use std::f32::consts::PI;
 
 pub struct RenderConfig {
     pub line_height: f32,
@@ -12,8 +11,6 @@ pub struct RenderConfig {
     pub alpha: f32,
 }
 
-const HOLD_PARTICLE_INTERVAL: f32 = 0.15;
-
 pub fn draw_note(
     res: &mut Resource,
     note: &Note,
@@ -21,64 +18,77 @@ pub fn draw_note(
     config: &RenderConfig,
     renderer: &mut Renderer,
 ) {
-    // Hit Effect Logic
-    if !note.fake {
-        // Monitor (Auto-Play) logic:
-        // 1. Trigger once for Click/Drag/Flick when time crosses note.time
-        // 2. Trigger at fixed frequency for Hold while time is within [note.time, end_time]
-
-        let should_emit = match note.kind {
-            NoteKind::Hold { end_time, .. } => {
-                if res.dt > 0.0 && res.time >= note.time && res.time <= end_time {
-                    let n_time = res.time - note.time;
-                    let n_prev_time = res.time - res.dt - note.time;
-
-                    let current_tick = (n_time / HOLD_PARTICLE_INTERVAL).floor() as i32;
-                    let prev_tick = if n_prev_time < 0.0 {
-                        -1
-                    } else {
-                        (n_prev_time / HOLD_PARTICLE_INTERVAL).floor() as i32
-                    };
-
-                    current_tick > prev_tick
-                } else {
-                    false
-                }
+    // Gate rendering by judge status
+    match &note.judge {
+        JudgeStatus::Judged => {
+            if !matches!(note.kind, NoteKind::Hold { .. }) {
+                // Click/Drag/Flick: stop rendering once judged
+                return;
             }
-            _ => {
-                // For others: emit only on the frame we cross note.time
-                res.dt > 0.0 && note.time > res.time - res.dt && note.time <= res.time
-            }
-        };
-
-        if should_emit {
-            let x = note.object.translation.x.now_opt().unwrap_or(0.0);
-            let transform = Matrix3::new_translation(&Vector2::new(x, 0.0));
-
-            res.with_model(transform, |res| {
-                if let Some(info) = res.res_pack.as_ref().map(|p| &p.info) {
-                    let color = info.fx_perfect();
-                    let rotation = if note.above { 0.0 } else { PI };
-                    res.emit_at_origin(rotation, color);
-                }
-            });
+            // Hold notes that are Judged = miss; will render at 50% alpha below
         }
+        _ => {}
     }
 
+    let res_pack = res.res_pack.as_ref().unwrap();
     let style_ref = if note.multiple_hint {
-        &res.res_pack.as_ref().unwrap().note_style_mh
+        &res_pack.note_style_mh
     } else {
-        &res.res_pack.as_ref().unwrap().note_style
+        &res_pack.note_style
     };
+
+    // Phira's double_hint scaling: multi-hint notes are wider by the ratio
+    // of mh texture width to normal texture width (prpr note.rs L199-203)
+    let scale = if note.multiple_hint {
+        let ratio =
+            res_pack.note_style_mh.click.width as f32 / res_pack.note_style.click.width as f32;
+        config.note_width * ratio
+    } else {
+        config.note_width
+    };
+
+    // Alpha modifier: Judged hold notes (miss) render at 50%
+    let judge_alpha = if matches!(note.judge, JudgeStatus::Judged)
+        && matches!(note.kind, NoteKind::Hold { .. })
+    {
+        0.5
+    } else {
+        1.0
+    };
+
     match &note.kind {
         NoteKind::Click => {
-            draw_simple_note(res, note, style_ref.click.clone(), config, renderer);
+            draw_simple_note(
+                res,
+                note,
+                style_ref.click.clone(),
+                scale,
+                config,
+                renderer,
+                judge_alpha,
+            );
         }
         NoteKind::Drag => {
-            draw_simple_note(res, note, style_ref.drag.clone(), config, renderer);
+            draw_simple_note(
+                res,
+                note,
+                style_ref.drag.clone(),
+                scale,
+                config,
+                renderer,
+                judge_alpha,
+            );
         }
         NoteKind::Flick => {
-            draw_simple_note(res, note, style_ref.flick.clone(), config, renderer);
+            draw_simple_note(
+                res,
+                note,
+                style_ref.flick.clone(),
+                scale,
+                config,
+                renderer,
+                judge_alpha,
+            );
         }
         NoteKind::Hold {
             end_time,
@@ -96,10 +106,12 @@ pub fn draw_note(
                 head_rect,
                 body_rect,
                 tail_rect,
+                scale,
                 config,
                 renderer,
                 *end_time,
                 *end_height,
+                judge_alpha,
             );
         }
     }
@@ -109,10 +121,11 @@ fn draw_simple_note(
     res: &mut Resource,
     note: &Note,
     texture: Texture,
+    scale: f32,
     config: &RenderConfig,
     renderer: &mut Renderer,
+    judge_alpha: f32,
 ) {
-    let scale = config.note_width;
     let x = note.object.translation.x.now_opt().unwrap_or(0.0);
 
     let spd = note.speed;
@@ -136,7 +149,7 @@ fn draw_simple_note(
         let w = scale * 2.0 * obj_scale_x;
         // Adjust aspect ratio of texture
         let h = w * (texture.height as f32 / texture.width as f32);
-        let alpha = note.object.alpha.now_opt().unwrap_or(1.0) * config.alpha;
+        let alpha = note.object.alpha.now_opt().unwrap_or(1.0) * config.alpha * judge_alpha;
 
         renderer.set_texture(&texture);
         renderer.draw_texture_rect(
@@ -164,10 +177,12 @@ fn draw_hold_note(
     head_rect: crate::engine::resource::Rect,
     body_rect: crate::engine::resource::Rect,
     tail_rect: crate::engine::resource::Rect,
+    scale: f32,
     config: &RenderConfig,
     renderer: &mut Renderer,
     _end_time: f32,
     end_height: f32,
+    judge_alpha: f32,
 ) {
     let spd = note.speed;
     let line_height_val = config.line_height;
@@ -183,13 +198,19 @@ fn draw_hold_note(
         return;
     }
 
+    // For active Hold notes, clamp head to line position (head doesn't go below line)
+    let clamped_head_y = if matches!(note.judge, JudgeStatus::Hold(..)) {
+        raw_head_y.max(0.0)
+    } else {
+        raw_head_y
+    };
+
     let x = note.object.translation.x.now_opt().unwrap_or(0.0);
     let transform = Matrix3::new_translation(&Vector2::new(x, 0.0));
     res.with_model(transform, |res| {
-        let scale = config.note_width;
         let obj_scale_x = note.object.scale.x.now_opt().unwrap_or(1.0);
         let width = scale * 2.0 * obj_scale_x;
-        let alpha = note.object.alpha.now_opt().unwrap_or(1.0) * config.alpha;
+        let alpha = note.object.alpha.now_opt().unwrap_or(1.0) * config.alpha * judge_alpha;
 
         renderer.set_texture(&texture);
 
@@ -237,26 +258,17 @@ fn draw_hold_note(
         };
 
         // Aspect ratio of texture parts
-        // Isotropic scaling: no need for 1.5 correction.
         let tex_aspect = texture.height as f32 / texture.width as f32;
 
         let head_h = width * (head_rect.h / head_rect.w) * tex_aspect;
         let tail_h = width * (tail_rect.h / tail_rect.w) * tex_aspect;
 
-        // Positions
-        // Head is at start (raw_head_y).
-        let head_y = raw_head_y;
-
-        // Tail is at end (raw_tail_y).
+        // Use clamped head position for active holds
+        let head_y = clamped_head_y;
         let tail_y = raw_tail_y;
 
         let is_compact = res.res_pack.as_ref().map_or(false, |p| p.info.hold_compact);
 
-        // In Phira, head/tail are centered at the point (if compact) or slightly offset.
-        // We'll align with prpr/src/core/note.rs logic:
-        // Head drawn at bottom - (compact ? hf.y : hf.y * 2)
-        // Since our draw_part(y, h) draws upwards from y:
-        // centered at Y means y = Y - h/2.
         let draw_head_y = head_y - if is_compact { head_h / 2.0 } else { head_h };
         let draw_tail_y = tail_y - if is_compact { tail_h / 2.0 } else { 0.0 };
 

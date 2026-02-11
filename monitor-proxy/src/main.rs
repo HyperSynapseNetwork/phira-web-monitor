@@ -182,9 +182,9 @@ async fn process_chart(id: &str) -> anyhow::Result<Vec<u8>> {
         }
     });
 
-    let chart = match info.format.clone().unwrap() {
+    let mut chart = match info.format.clone().unwrap() {
         ChartFormat::Rpe => {
-            let reader = Cursor::new(zip_bytes);
+            let reader = Cursor::new(zip_bytes.clone());
             let archive = Arc::new(Mutex::new(zip::ZipArchive::new(reader)?));
             let mut loader = ZipLoader { archive };
             rpe::parse_rpe(&chart_text?, &mut loader)
@@ -202,12 +202,67 @@ async fn process_chart(id: &str) -> anyhow::Result<Vec<u8>> {
             .map_err(|e| anyhow::anyhow!("PBC parse error: {}", e))?,
     };
 
-    if let Some(_) = extra_json {
-        // TODO: implement extra.json parsing
-        log::warn!("Ignoring extra.json: Not implemented yet.");
+    // 5. Load Audio (Music and Hitsounds)
+    log::info!("Extracting audio resources...");
+
+    // Music
+    if let Ok(mut music_file) = zip.by_path(&info.music) {
+        let mut bytes = Vec::new();
+        music_file.read_to_end(&mut bytes)?;
+        let ext = std::path::Path::new(&info.music)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("mp3");
+
+        use monitor_common::core::AudioClip;
+        match AudioClip::load_from_bytes(&bytes, ext) {
+            Ok(clip) => {
+                log::info!(
+                    "Music Loaded: {} Hz, {} channels",
+                    clip.sample_rate,
+                    clip.channel_count
+                );
+                chart.music = Some(clip);
+            }
+            Err(e) => log::warn!("Failed to decode music {}: {}", info.music, e),
+        }
     }
 
-    // 5. Serialize to bincode
+    // Extra Hitsounds
+    if let Some(extra_source) = extra_json {
+        if let Ok(extra) = parse::extra::parse_extra(&extra_source) {
+            if let Some(mappings) = extra.hitsounds {
+                for (kind_str, filename) in mappings {
+                    if let Ok(mut file) = zip.by_name(&filename) {
+                        let mut bytes = Vec::new();
+                        file.read_to_end(&mut bytes)?;
+                        let ext = std::path::Path::new(&filename)
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("wav");
+
+                        use monitor_common::core::{AudioClip, HitSound};
+                        match AudioClip::load_from_bytes(&bytes, ext) {
+                            Ok(clip) => {
+                                let kind = match kind_str.to_lowercase().as_str() {
+                                    "click" => HitSound::Click,
+                                    "drag" => HitSound::Drag,
+                                    "flick" => HitSound::Flick,
+                                    _ => HitSound::Custom(kind_str),
+                                };
+                                chart.hitsounds.insert(kind, clip);
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to decode custom hitsound {}: {}", filename, e)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 6. Serialize to bincode
     use bincode::Options;
     bincode::options()
         .with_varint_encoding()

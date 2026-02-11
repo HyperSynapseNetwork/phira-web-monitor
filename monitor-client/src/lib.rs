@@ -1,5 +1,6 @@
-use crate::engine::{chart::ChartRenderer, resource::Resource};
-use monitor_common::core::{Chart, ChartInfo};
+use crate::engine::{ChartRenderer, JudgeEventKind, Resource, ResourcePack};
+use crate::renderer::Texture;
+use monitor_common::core::{Chart, ChartInfo, HitSound, JudgeLineKind, JudgeStatus, NoteKind};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
@@ -21,80 +22,146 @@ macro_rules! console_log {
 }
 
 #[wasm_bindgen]
-pub struct Monitor {}
-
-#[wasm_bindgen]
-pub struct MonitorView {
+pub struct ChartPlayer {
     renderer: renderer::Renderer,
     chart_renderer: ChartRenderer,
-    start_time: Option<f64>,
+    resource: Resource,
+    audio_engine: audio::AudioEngine,
+    paused: bool,
+    current_time: f32,
+    last_update_time: Option<f64>,
 }
 
 #[wasm_bindgen]
-impl Monitor {
-    #[wasm_bindgen(constructor)]
-    pub fn new() -> Monitor {
-        console_error_panic_hook::set_once();
-        console_log!("Monitor Client Initialized");
-        Monitor {}
+impl ChartPlayer {
+    fn sync_hitsounds(&mut self) -> Result<(), JsValue> {
+        if let Some(pack) = &self.resource.res_pack {
+            for (kind, clip) in &pack.hitsounds {
+                self.audio_engine.set_hitsound(kind.clone(), clip)?;
+            }
+        }
+        Ok(())
     }
 
-    pub fn monitor(&mut self, user_id: i32, canvas_id: String) -> Result<MonitorView, JsValue> {
-        console_log!(
-            "Creating MonitorView for User {} on Canvas '{}'",
-            user_id,
-            canvas_id
-        );
+    #[wasm_bindgen(constructor)]
+    pub fn new(canvas_id: String) -> Result<ChartPlayer, JsValue> {
+        console_error_panic_hook::set_once();
+        console_log!("ChartPlayer Initialized on Canvas '{}'", canvas_id);
 
         let renderer = renderer::Renderer::new(&canvas_id)?;
-
-        // MVP: Initialize with dummy chart
         let mut resource = Resource::new(renderer.context.width, renderer.context.height);
         resource.load_defaults(&renderer.context)?;
+
         let info = ChartInfo::default();
         let chart = Chart::default();
 
-        Ok(MonitorView {
+        let mut player = ChartPlayer {
             renderer,
-            chart_renderer: ChartRenderer::new(info, chart, resource),
-            start_time: None,
-        })
+            chart_renderer: ChartRenderer::new(info, chart),
+            resource,
+            audio_engine: audio::AudioEngine::new()?,
+            paused: true,
+            current_time: 0.0,
+            last_update_time: None,
+        };
+        player.sync_hitsounds()?;
+        Ok(player)
     }
-}
 
-#[wasm_bindgen]
-impl MonitorView {
+    pub fn pause(&mut self) -> Result<(), JsValue> {
+        self.paused = true;
+        self.last_update_time = None;
+        self.audio_engine.pause()
+    }
+
+    pub fn resume(&mut self) -> Result<(), JsValue> {
+        self.paused = false;
+        self.last_update_time = None;
+        self.audio_engine.play(self.current_time)
+    }
+
+    pub fn set_time(&mut self, time: f32) {
+        self.current_time = time;
+        self.last_update_time = None;
+
+        // Reset all judge states on seek
+        for line in &mut self.chart_renderer.chart.lines {
+            for note in &mut line.notes {
+                note.judge = JudgeStatus::NotJudged;
+            }
+        }
+
+        // Force update chart state immediately
+        self.chart_renderer
+            .update(&mut self.resource, self.current_time);
+    }
+
+    pub fn set_autoplay(&mut self, flag: bool) {
+        self.chart_renderer.autoplay = flag;
+    }
+
     pub fn render(&mut self) -> Result<(), JsValue> {
+        let now = web_sys::window().unwrap().performance().unwrap().now();
+
+        let mut dt = 0.0;
+        if !self.paused {
+            self.current_time = self.audio_engine.get_time();
+            if let Some(last) = self.last_update_time {
+                dt = (now - last) as f32 / 1000.0;
+            }
+            self.last_update_time = Some(now);
+        }
+        self.resource.dt = dt;
+
         self.renderer.clear();
         self.renderer.begin_frame();
 
-        let aspect = self.chart_renderer.resource.aspect_ratio;
+        let aspect = self.resource.aspect_ratio;
         let y_scale = aspect;
 
         self.renderer.set_projection(&[
-            1.0, // x scale (maps [-1, 1] to [-1, 1])
-            0.0, 0.0, 0.0, 0.0, y_scale, // y scale
-            0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 0.0, 0.0, y_scale, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ]);
 
-        let now = web_sys::window().unwrap().performance().unwrap().now();
+        self.chart_renderer
+            .update(&mut self.resource, self.current_time);
 
-        if self.start_time.is_none() {
-            self.start_time = Some(now);
+        // Judge update pass — produces events for hitsounds/particles
+        let events = self.chart_renderer.update_judges(&self.resource);
+
+        // Consume events: play hitsounds
+        for event in &events {
+            match &event.kind {
+                JudgeEventKind::Judged(_) | JudgeEventKind::HoldStart => {
+                    let note =
+                        &self.chart_renderer.chart.lines[event.line_idx].notes[event.note_idx];
+                    let hitsound = note.hitsound.clone().unwrap_or_else(|| match note.kind {
+                        NoteKind::Click => HitSound::Click,
+                        NoteKind::Drag => HitSound::Drag,
+                        NoteKind::Flick => HitSound::Flick,
+                        _ => HitSound::Click,
+                    });
+                    let _ = self.audio_engine.play_hitsound(&hitsound);
+                }
+                _ => {}
+            }
         }
 
-        let time = (now - self.start_time.unwrap()) / 1000.0;
-        self.renderer.clear();
-        self.renderer.begin_frame();
-        self.chart_renderer.update(time as f32);
-        self.chart_renderer.render(&mut self.renderer);
+        // Consume events: emit particles
+        self.chart_renderer
+            .emit_particles(&mut self.resource, &events);
+
+        self.chart_renderer
+            .render(&mut self.resource, &mut self.renderer);
         self.renderer.flush();
         Ok(())
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
         self.renderer.resize(width, height);
-        self.chart_renderer.resize(width, height);
+        self.resource.width = width;
+        self.resource.height = height;
+        self.resource.aspect_ratio = width as f32 / height as f32;
     }
 
     pub async fn load_chart(&mut self, id: String) -> Result<JsValue, JsValue> {
@@ -121,11 +188,9 @@ impl MonitorView {
             .deserialize(&vec)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse chart: {}", e)))?;
 
-        // get order
         chart.order = (0..chart.lines.len()).collect();
         chart.order.sort_by_key(|&i| chart.lines[i].z_index);
 
-        // Sort notes in each line by time and then by priority (order)
         for line in &mut chart.lines {
             line.notes.sort_by(|a, b| {
                 a.time
@@ -135,17 +200,11 @@ impl MonitorView {
             });
         }
 
-        // Preserve existing resource pack if any
-        let existing_pack = self.chart_renderer.resource.res_pack.take();
-
-        // Re-initialize resource and renderer
-        let renderer = &self.renderer; // Borrow renderer for context
+        let existing_pack = self.resource.res_pack.take();
+        let renderer = &self.renderer;
         let mut resource = Resource::new(renderer.context.width, renderer.context.height);
         resource.load_defaults(&renderer.context)?;
 
-        // Restore resource pack if we had one (and it wasn't just the default fallback, or even if it was)
-        // Ideally we check if it's the fallback, but simply restoring the last active one is usually what we want
-        // because loadResourcePack updates the active one.
         if let Some(pack) = existing_pack {
             if pack.info.name != "fallback" {
                 resource
@@ -154,51 +213,22 @@ impl MonitorView {
             }
         }
 
-        // Load textures from chart
-        use monitor_common::core::JudgeLineKind;
         for (i, line) in chart.lines.iter().enumerate() {
             match &line.kind {
                 JudgeLineKind::Texture(tex, _) => {
-                    console_log!("Loading texture for line {}", i);
-                    match crate::renderer::Texture::load_from_bytes(&renderer.context, tex.data())
-                        .await
+                    if let Ok(texture) =
+                        Texture::load_from_bytes(&renderer.context, tex.data()).await
                     {
-                        Ok(texture) => {
-                            console_log!(
-                                "Loaded texture for line {}: {}x{}",
-                                i,
-                                texture.width,
-                                texture.height
-                            );
-                            resource.line_textures.insert(i, texture);
-                        }
-                        Err(e) => {
-                            console_log!("Failed to load texture for line {}: {:?}", i, e);
-                        }
+                        resource.line_textures.insert(i, texture);
                     }
                 }
                 JudgeLineKind::TextureGif(_, frames, _) => {
-                    console_log!("Loading GIF frames for line {}", i);
                     let mut gl_frames = Vec::new();
                     for (_time, tex) in &frames.frames {
-                        match crate::renderer::Texture::load_from_bytes(
-                            &renderer.context,
-                            tex.data(),
-                        )
-                        .await
+                        if let Ok(texture) =
+                            Texture::load_from_bytes(&renderer.context, tex.data()).await
                         {
-                            Ok(texture) => {
-                                console_log!(
-                                    "Loaded GIF frame for line {}: {}x{}",
-                                    i,
-                                    texture.width,
-                                    texture.height
-                                );
-                                gl_frames.push(texture);
-                            }
-                            Err(e) => {
-                                console_log!("Failed to load GIF frame for line {}: {:?}", i, e);
-                            }
+                            gl_frames.push(texture);
                         }
                     }
                     resource.line_gif_textures.insert(i, gl_frames);
@@ -207,10 +237,30 @@ impl MonitorView {
             }
         }
 
-        // Also check if audio should be loaded (TODO)
+        let autoplay = self.chart_renderer.autoplay;
+        self.chart_renderer = ChartRenderer::new(info.clone(), chart);
+        self.chart_renderer.autoplay = autoplay;
+        self.resource = resource;
+        self.current_time = 0.0;
+        self.paused = true;
+        self.last_update_time = None;
 
-        self.chart_renderer = ChartRenderer::new(info.clone(), chart, resource);
-        self.start_time = None;
+        // Load Audio into Engine
+        self.audio_engine.pause()?;
+        self.audio_engine
+            .set_offset(self.chart_renderer.chart.offset);
+
+        if let Some(music) = &self.chart_renderer.chart.music {
+            self.audio_engine.set_music(music)?;
+        }
+
+        // 1. Sync default hitsounds from resource pack
+        self.sync_hitsounds()?;
+
+        // 2. Override with chart-specific hitsounds if any
+        for (kind, clip) in &self.chart_renderer.chart.hitsounds {
+            self.audio_engine.set_hitsound(kind.clone(), clip)?;
+        }
 
         serde_wasm_bindgen::to_value(&info)
             .map_err(|e| JsValue::from_str(&format!("Failed to serialize chart info: {}", e)))
@@ -223,39 +273,21 @@ impl MonitorView {
         for i in 0..entries.length() {
             let entry = entries.get(i);
             let entry_array = js_sys::Array::from(&entry);
-            let key = entry_array
-                .get(0)
-                .as_string()
-                .ok_or("Invalid key in file map")?;
+            let key = entry_array.get(0).as_string().ok_or("Invalid key")?;
             let value = entry_array.get(1);
             let uint8_array = js_sys::Uint8Array::new(&value);
-            let bytes = uint8_array.to_vec();
-            file_map.insert(key, bytes);
+            file_map.insert(key, uint8_array.to_vec());
         }
 
-        console_log!("Loading resource pack with {} files", file_map.len());
-
-        use crate::engine::resource::ResourcePack;
         let res_pack = ResourcePack::load(&self.renderer.context, file_map)
             .await
-            .map_err(|e| JsValue::from_str(&format!("Failed to load resource pack: {:?}", e)))?;
+            .map_err(|e| JsValue::from_str(&format!("Failed to load pack: {:?}", e)))?;
 
-        console_log!(
-            "Resource pack loaded: {}\n  Author: {}\n  Description: {}",
-            res_pack.info.name,
-            res_pack.info.author,
-            res_pack.info.description
-        );
-        if res_pack.font.is_some() {
-            console_log!("Resource pack contains a font.");
-        } else {
-            console_log!("Resource pack DOES NOT contain a font.");
-        }
-
-        self.chart_renderer
-            .resource
+        self.resource
             .set_pack(&self.renderer.context, res_pack)
-            .map_err(|e| JsValue::from_str(&format!("Failed to set resource pack: {}", e)))?;
+            .map_err(|e| JsValue::from_str(&format!("Failed to set pack: {}", e)))?;
+
+        self.sync_hitsounds()?;
 
         Ok(())
     }

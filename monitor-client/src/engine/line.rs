@@ -1,9 +1,6 @@
-use core::f32;
-
-use crate::engine::note::{RenderConfig, draw_note};
-use crate::engine::resource::{Resource, Vector};
+use crate::engine::{RenderConfig, Resource, draw_note};
 use crate::renderer::Renderer;
-use monitor_common::core::{ChartSettings, JudgeLine, JudgeLineKind, Matrix};
+use monitor_common::core::{ChartSettings, JudgeLine, JudgeLineKind, Matrix, Vector};
 
 pub fn draw_line(
     res: &mut Resource,
@@ -67,15 +64,6 @@ pub fn draw_line(
                     alpha * color.a,
                     &res.get_gl_matrix(),
                 );
-                if f32::abs(alpha * color.a) > 0.001 {
-                    web_sys::console::log_1(
-                        &format!(
-                            "DEBUG Line {}: alpha={:.3}, color=({:.2},{:.2},{:.2},{:.2})",
-                            line_index, alpha, color.r, color.g, color.b, color.a
-                        )
-                        .into(),
-                    );
-                }
             }
             JudgeLineKind::Texture(_, _) => {
                 if let Some(texture) = res.line_textures.get(&line_index) {

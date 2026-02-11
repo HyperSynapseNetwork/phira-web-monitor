@@ -462,6 +462,7 @@ async fn parse_notes(
             multiple_hint: false,
             fake: note.is_fake != 0,
             hitsound,
+            ..Default::default()
         })
     }
     Ok(notes)

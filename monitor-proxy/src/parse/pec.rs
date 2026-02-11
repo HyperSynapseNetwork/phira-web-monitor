@@ -284,6 +284,7 @@ pub async fn parse_pec(source: &str) -> Result<Chart> {
                         above,
                         multiple_hint: false,
                         fake,
+                        ..Default::default()
                     });
 
                     let mut it_clone = it.clone();

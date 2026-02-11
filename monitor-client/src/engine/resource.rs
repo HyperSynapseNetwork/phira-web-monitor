@@ -1,12 +1,8 @@
 use crate::renderer::Texture;
 use anyhow::Result;
-use nalgebra::{Matrix3, Point2, Vector2};
+use monitor_common::core::{AudioClip, HitSound, HitSoundMap, Matrix, Point, Vector};
 use serde::Deserialize;
 use std::collections::HashMap;
-
-pub type Matrix = Matrix3<f32>;
-pub type Point = Point2<f32>;
-pub type Vector = Vector2<f32>;
 
 #[derive(Deserialize, Clone, Copy)]
 pub struct Rect {
@@ -148,13 +144,14 @@ pub struct ResourcePack {
     pub note_style_mh: NoteStyle,
     pub hit_fx: Texture,
     pub font: Option<crate::renderer::text::SpriteFont>,
+    pub hitsounds: HitSoundMap,
 }
 
 impl ResourcePack {
     pub async fn load(
         ctx: &crate::renderer::GlContext,
         files: HashMap<String, Vec<u8>>,
-    ) -> Result<Self, anyhow::Error> {
+    ) -> anyhow::Result<Self> {
         let info_bytes = files
             .get("info.yml")
             .ok_or_else(|| anyhow::anyhow!("Missing info.yml"))?;
@@ -173,6 +170,20 @@ impl ResourcePack {
             Ok(Texture::load_from_bytes(ctx, bytes)
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to load texture {}: {:?}", name, e))?)
+        }
+
+        // Helper to load audio from bytes
+        fn load_audio(files: &HashMap<String, Vec<u8>>, name: &str) -> Option<AudioClip> {
+            let exts = ["mp3", "ogg", "wav"];
+            for ext in exts {
+                let filename = format!("{}.{}", name, ext);
+                if let Some(bytes) = files.get(&filename) {
+                    if let Ok(clip) = AudioClip::load_from_bytes(bytes, ext) {
+                        return Some(clip);
+                    }
+                }
+            }
+            None
         }
 
         let note_style = NoteStyle::new(
@@ -209,12 +220,25 @@ impl ResourcePack {
             None
         };
 
+        let mut hitsounds = HashMap::new();
+        web_sys::console::log_1(&"Loading hitsounds".into());
+        if let Some(clip) = load_audio(&files, "click") {
+            hitsounds.insert(HitSound::Click, clip);
+        }
+        if let Some(clip) = load_audio(&files, "drag") {
+            hitsounds.insert(HitSound::Drag, clip);
+        }
+        if let Some(clip) = load_audio(&files, "flick") {
+            hitsounds.insert(HitSound::Flick, clip);
+        }
+
         Ok(Self {
             info,
             note_style,
             note_style_mh,
             hit_fx,
             font,
+            hitsounds,
         })
     }
 }
@@ -412,6 +436,7 @@ impl Resource {
             note_style_mh: style_mh,
             hit_fx: crate::renderer::Texture::create_solid_color(ctx, 1, 1, [255, 255, 255, 255])?,
             font: None,
+            hitsounds: HashMap::new(),
         };
 
         self.set_pack(ctx, res_pack)?;
@@ -490,8 +515,8 @@ impl Resource {
     pub fn emit_at_origin(&mut self, rotation: f32, color: monitor_common::core::Color) {
         let model = self.current_model();
         if let Some(emitter) = &mut self.emitter {
-            let pt = model.transform_point(&nalgebra::Point2::origin());
-            let vec = Vector2::new(pt.x, pt.y);
+            let pt = model.transform_point(&Point::origin());
+            let vec = Vector::new(pt.x, pt.y);
             emitter.emit_at(vec, rotation, color);
         }
     }

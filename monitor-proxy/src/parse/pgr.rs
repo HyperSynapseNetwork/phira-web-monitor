@@ -250,10 +250,10 @@ fn parse_notes(
                     height.set_time(time);
                     height.now()
                 },
-
                 above,
                 multiple_hint: false,
                 fake: false,
+                ..Default::default()
             })
         })
         .collect()

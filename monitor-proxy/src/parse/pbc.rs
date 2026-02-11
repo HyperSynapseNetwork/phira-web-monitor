@@ -3,8 +3,8 @@ use anyhow::{bail, Result};
 use byteorder::{LittleEndian as LE, ReadBytesExt};
 use monitor_common::core::{
     Anim, AnimVector, BezierTween, BpmList, Chart, ChartSettings, ClampedTween, CtrlObject,
-    JudgeLine, JudgeLineKind, Keyframe, Note, NoteKind, Object, Texture, TweenFn, Tweenable,
-    UIElement,
+    JudgeLine, JudgeLineKind, JudgeStatus, Keyframe, Note, NoteKind, Object, Texture, TweenFn,
+    Tweenable, UIElement,
 };
 use std::io::Read;
 
@@ -176,6 +176,7 @@ fn read_note(r: &mut BinaryReader<impl Read>) -> Result<Note> {
         above: r.read_bool()?,
         multiple_hint: false,
         fake: r.read_bool()?,
+        ..Default::default()
     })
 }
 

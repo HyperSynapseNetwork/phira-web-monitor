@@ -1,16 +1,19 @@
 use wasm_bindgen::prelude::*;
 
 mod batch;
-mod context;
-pub mod particle;
-mod shader;
-pub mod text;
-mod texture;
-
 pub use batch::Batcher;
+
+mod context;
 pub use context::GlContext;
+
+mod shader;
 pub use shader::ShaderManager;
+
+mod texture;
 pub use texture::Texture;
+
+pub mod particle;
+pub mod text;
 
 #[wasm_bindgen]
 pub struct Renderer {

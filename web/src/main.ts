@@ -1,4 +1,4 @@
-import init, { Monitor, MonitorView } from "monitor-client";
+import init, { ChartPlayer } from "monitor-client";
 
 async function main() {
   console.log("Initializing Wasm...");
@@ -20,20 +20,16 @@ async function main() {
   resize();
 
   try {
-    const monitor = new Monitor();
-    console.log("Monitor instance created.");
-
-    // Simulate monitoring user 1234
-    const view = monitor.monitor(1234, "gl-canvas");
-    console.log("MonitorView created.");
+    const player = new ChartPlayer("gl-canvas");
+    console.log("ChartPlayer instance created.");
 
     const statusEl = document.getElementById("status");
-    if (statusEl) statusEl.innerText = "Monitoring User 1234";
+    if (statusEl) statusEl.innerText = "Active";
     const wasmStatusEl = document.getElementById("wasm-status");
     if (wasmStatusEl) wasmStatusEl.innerText = "Running";
 
-    // Expose view for debugging
-    (window as any).monitorView = view;
+    // Expose for debugging
+    (window as any).chartPlayer = player;
 
     // Load Resource Pack
     async function loadResourcePack() {
@@ -49,6 +45,9 @@ async function main() {
         "hold.png",
         "hold_mh.png",
         "hit_fx.png",
+        "click.ogg",
+        "drag.ogg",
+        "flick.ogg",
       ];
 
       const fileMap: Record<string, Uint8Array> = {};
@@ -56,7 +55,7 @@ async function main() {
       try {
         await Promise.all(
           files.map(async (file) => {
-            const resp = await fetch(`/assets/skin/${file}`);
+            const resp = await fetch(`/assets/respack/default/${file}`);
             if (!resp.ok) {
               throw new Error(`Failed to fetch ${file}: ${resp.statusText}`);
             }
@@ -66,7 +65,7 @@ async function main() {
         );
 
         console.log("Resource pack files fetched. Loading into WASM...");
-        await view.load_resource_pack(fileMap);
+        await player.load_resource_pack(fileMap);
         console.log("Resource pack loaded successfully.");
       } catch (e) {
         console.error("Failed to load resource pack:", e);
@@ -84,6 +83,47 @@ async function main() {
 
     let isLoading = false;
 
+    // Play/Pause Toggle Logic
+    const playPauseBtn = document.getElementById("play-pause-btn");
+    let isPaused = true;
+
+    if (playPauseBtn) {
+      playPauseBtn.onclick = async () => {
+        try {
+          if (isPaused) {
+            await player.resume();
+            playPauseBtn.innerText = "Pause";
+            playPauseBtn.style.background =
+              "linear-gradient(135deg, #ef4444, #dc2626)";
+            isPaused = false;
+          } else {
+            await player.pause();
+            playPauseBtn.innerText = "Play";
+            playPauseBtn.style.background =
+              "linear-gradient(135deg, #10b981, #059669)";
+            isPaused = true;
+          }
+        } catch (e) {
+          console.error("Audio error:", e);
+        }
+      };
+    }
+
+    // Autoplay Toggle Logic
+    const autoplayBtn = document.getElementById("autoplay-btn");
+    let isAutoplay = true;
+
+    if (autoplayBtn) {
+      autoplayBtn.onclick = () => {
+        isAutoplay = !isAutoplay;
+        player.set_autoplay(isAutoplay);
+        autoplayBtn.innerText = isAutoplay ? "AP: ON" : "AP: OFF";
+        autoplayBtn.style.background = isAutoplay
+          ? "linear-gradient(135deg, #8b5cf6, #6d28d9)"
+          : "linear-gradient(135deg, #64748b, #475569)";
+      };
+    }
+
     if (loadBtn && chartIdInput) {
       loadBtn.onclick = async () => {
         const id = chartIdInput.value;
@@ -96,7 +136,16 @@ async function main() {
         isLoading = true;
 
         try {
-          const info = (await view.load_chart(id)) as any;
+          const info = (await player.load_chart(id)) as any;
+
+          // Reset play/pause state when a new chart is loaded
+          isPaused = true;
+          if (playPauseBtn) {
+            playPauseBtn.innerText = "Play";
+            playPauseBtn.style.background =
+              "linear-gradient(135deg, #10b981, #059669)";
+          }
+
           if (statusEl) statusEl.innerText = `Chart ${id} Loaded`;
           console.log(`Chart ${id} loaded successfully.`, info);
 
@@ -154,8 +203,8 @@ async function main() {
         return;
       }
       try {
-        view.resize(canvas.width, canvas.height);
-        view.render();
+        player.resize(canvas.width, canvas.height);
+        player.render();
       } catch (e) {
         errorCount++;
         if (errorCount % 60 === 0) {

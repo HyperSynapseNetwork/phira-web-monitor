@@ -42,6 +42,24 @@ impl Default for NoteKind {
     }
 }
 
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+pub enum JudgeStatus {
+    #[default]
+    NotJudged,
+    PreJudge,
+    Judged,
+    Hold(bool, f32, f32, bool, f32), // perfect, at, diff, pre-judge, up-time
+}
+
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+pub enum Judgement {
+    Perfect,
+    Good,
+    Bad,
+    Miss,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Note {
     /// Object transform animations
@@ -62,6 +80,9 @@ pub struct Note {
     pub fake: bool,
     /// Index of the hitsound in the chart's audio clips
     pub hitsound: Option<HitSound>,
+    /// Judge status
+    #[serde(skip)]
+    pub judge: JudgeStatus,
 }
 
 impl Default for Note {
@@ -72,10 +93,11 @@ impl Default for Note {
             time: 0.,
             height: 0.,
             speed: 1.,
-            above: false,
+            above: true,
             multiple_hint: false,
             fake: false,
             hitsound: None,
+            judge: JudgeStatus::NotJudged,
         }
     }
 }
@@ -88,10 +110,11 @@ impl Note {
             time,
             height,
             speed: 1.,
-            above: false,
+            above: true,
             multiple_hint: false,
             fake: false,
             hitsound: None,
+            judge: JudgeStatus::NotJudged,
         }
     }
 
@@ -320,6 +343,8 @@ pub type HitSoundMap = HashMap<HitSound, AudioClip>;
 /// A complete chart
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Chart {
+    /// Music for the chart
+    pub music: Option<AudioClip>,
     /// Offset in seconds (for sync adjustment)
     pub offset: f32,
     /// All judge lines
@@ -342,6 +367,7 @@ pub struct Chart {
 impl Chart {
     pub fn new(offset: f32, lines: Vec<JudgeLine>, bpm_list: BpmList) -> Self {
         Self {
+            music: None,
             offset,
             lines,
             bpm_list,
