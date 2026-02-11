@@ -47,48 +47,15 @@ pub fn draw_note(
         config.note_width
     };
 
-    // Alpha modifier: Judged hold notes (miss) render at 50%
-    let judge_alpha = if matches!(note.judge, JudgeStatus::Judged)
-        && matches!(note.kind, NoteKind::Hold { .. })
-    {
-        0.5
-    } else {
-        1.0
-    };
-
     match &note.kind {
         NoteKind::Click => {
-            draw_simple_note(
-                res,
-                note,
-                style_ref.click.clone(),
-                scale,
-                config,
-                renderer,
-                judge_alpha,
-            );
+            draw_simple_note(res, note, style_ref.click.clone(), scale, config, renderer);
         }
         NoteKind::Drag => {
-            draw_simple_note(
-                res,
-                note,
-                style_ref.drag.clone(),
-                scale,
-                config,
-                renderer,
-                judge_alpha,
-            );
+            draw_simple_note(res, note, style_ref.drag.clone(), scale, config, renderer);
         }
         NoteKind::Flick => {
-            draw_simple_note(
-                res,
-                note,
-                style_ref.flick.clone(),
-                scale,
-                config,
-                renderer,
-                judge_alpha,
-            );
+            draw_simple_note(res, note, style_ref.flick.clone(), scale, config, renderer);
         }
         NoteKind::Hold {
             end_time,
@@ -98,6 +65,11 @@ pub fn draw_note(
             let body_rect = style_ref.hold_body_rect();
             let tail_rect = style_ref.hold_tail_rect();
             let hold_tex = style_ref.hold.clone();
+            let alpha = if matches!(note.judge, JudgeStatus::Judged) {
+                0.5
+            } else {
+                1.0
+            };
 
             draw_hold_note(
                 res,
@@ -111,7 +83,6 @@ pub fn draw_note(
                 renderer,
                 *end_time,
                 *end_height,
-                judge_alpha,
             );
         }
     }
@@ -124,7 +95,6 @@ fn draw_simple_note(
     scale: f32,
     config: &RenderConfig,
     renderer: &mut Renderer,
-    judge_alpha: f32,
 ) {
     let x = note.object.translation.x.now_opt().unwrap_or(0.0);
 
@@ -149,7 +119,7 @@ fn draw_simple_note(
         let w = scale * 2.0 * obj_scale_x;
         // Adjust aspect ratio of texture
         let h = w * (texture.height as f32 / texture.width as f32);
-        let alpha = note.object.alpha.now_opt().unwrap_or(1.0) * config.alpha * judge_alpha;
+        let alpha = note.object.alpha.now_opt().unwrap_or(1.0) * config.alpha;
 
         renderer.set_texture(&texture);
         renderer.draw_texture_rect(
@@ -182,7 +152,6 @@ fn draw_hold_note(
     renderer: &mut Renderer,
     _end_time: f32,
     end_height: f32,
-    judge_alpha: f32,
 ) {
     let spd = note.speed;
     let line_height_val = config.line_height;
@@ -210,7 +179,13 @@ fn draw_hold_note(
     res.with_model(transform, |res| {
         let obj_scale_x = note.object.scale.x.now_opt().unwrap_or(1.0);
         let width = scale * 2.0 * obj_scale_x;
-        let alpha = note.object.alpha.now_opt().unwrap_or(1.0) * config.alpha * judge_alpha;
+        let alpha = note.object.alpha.now_opt().unwrap_or(1.0)
+            * config.alpha
+            * if matches!(note.judge, JudgeStatus::Judged) {
+                0.5
+            } else {
+                1.0
+            };
 
         renderer.set_texture(&texture);
 

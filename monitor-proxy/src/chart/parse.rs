@@ -19,7 +19,7 @@ pub trait ResourceLoader: Send + Sync {
 use monitor_common::core::{easing_from, JudgeLine, TweenId, TweenMajor, TweenMinor};
 use std::cmp::Ordering;
 
-pub(crate) fn process_lines(v: &mut [JudgeLine]) {
+pub(in crate::chart) fn process_lines(v: &mut [JudgeLine]) {
     let mut times = Vec::new();
     // TODO optimize using k-merge sort
     let sorts = v
