@@ -16,6 +16,7 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 
 mod chart;
+mod rooms;
 
 // ── CLI Arguments ──────────────────────────────────────────────────────────────
 
@@ -33,6 +34,10 @@ pub struct Args {
     /// Phira API base URL
     #[arg(long, default_value = "https://api.phira.cn")]
     pub api_base: String,
+
+    /// Phira-mp server address
+    #[arg(long, default_value = "localhost:12346")]
+    pub mp_server: String,
 }
 
 // ── Application State ──────────────────────────────────────────────────────────
@@ -68,7 +73,9 @@ async fn main() -> anyhow::Result<()> {
         .allow_headers(Any);
 
     let app = Router::new()
-        .route("/chart/:id", get(chart::fetch_and_parse_chart))
+        .route("/chart/{id}", get(chart::fetch_and_parse_chart))
+        .route("/rooms", get(rooms::query_rooms))
+        .route("/rooms/{id}", get(rooms::query_room))
         .fallback_service(ServeDir::new("../web/dist"))
         .layer(cors)
         .with_state(state);

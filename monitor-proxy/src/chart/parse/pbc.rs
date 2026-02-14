@@ -3,8 +3,8 @@ use anyhow::{bail, Result};
 use byteorder::{LittleEndian as LE, ReadBytesExt};
 use monitor_common::core::{
     Anim, AnimVector, BezierTween, BpmList, Chart, ChartSettings, ClampedTween, CtrlObject,
-    JudgeLine, JudgeLineKind, JudgeStatus, Keyframe, Note, NoteKind, Object, Texture, TweenFn,
-    Tweenable, UIElement,
+    JudgeLine, JudgeLineKind, Keyframe, Note, NoteKind, Object, Texture, TweenFn, Tweenable,
+    UIElement,
 };
 use std::io::Read;
 
