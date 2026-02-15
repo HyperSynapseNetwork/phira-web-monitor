@@ -1,4 +1,4 @@
-use crate::AppState;
+use crate::{json_err, AppState};
 use anyhow::{Context, Result};
 use axum::{
     extract::{Path, State},
@@ -7,35 +7,32 @@ use axum::{
     Json,
 };
 use serde_json::{json, Value};
-use std::sync::Arc;
+
 use tokio::{net::TcpStream, sync::oneshot};
 
 use phira_mp_common::{ClientCommand, RoomId, ServerCommand, Stream};
 
-pub async fn query_rooms(State(state): State<Arc<AppState>>) -> Response {
-    let resp = query_rooms_inner(&state.args.mp_server, None)
+pub async fn query_rooms(State(state): State<AppState>) -> (StatusCode, Response) {
+    query_rooms_inner(&state.args.mp_server, None)
         .await
-        .map(|s| (StatusCode::OK, Json(s)))
+        .map(|s| (StatusCode::OK, Json(s).into_response()))
         .unwrap_or_else(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("{e}")})),
-            )
-        });
-    resp.into_response()
+            log::error!("Error querying rooms: {e:?}");
+            (StatusCode::INTERNAL_SERVER_ERROR, json_err!("{e}"))
+        })
 }
 
-pub async fn query_room(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    let resp = query_rooms_inner(&state.args.mp_server, Some(id))
+pub async fn query_room(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> (StatusCode, Response) {
+    query_rooms_inner(&state.args.mp_server, Some(id))
         .await
-        .map(|s| (StatusCode::OK, Json(s)))
+        .map(|s| (StatusCode::OK, Json(s).into_response()))
         .unwrap_or_else(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("{e}")})),
-            )
-        });
-    resp.into_response()
+            log::error!("Error querying rooms: {e:?}");
+            (StatusCode::INTERNAL_SERVER_ERROR, json_err!("{e}"))
+        })
 }
 
 async fn query_rooms_inner(mp_server: &str, id: Option<String>) -> Result<Value> {

@@ -6,15 +6,17 @@ mod test_chart;
 use crate::AppState;
 use anyhow::Context;
 use axum::{
+    body::Body,
     extract::{Path, State},
-    http::{HeaderValue, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
-use std::sync::Arc;
+use reqwest::header;
+
 use tokio::sync::broadcast;
 
 pub async fn fetch_and_parse_chart(
-    State(state): State<Arc<AppState>>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
     log::info!("Processing chart request for ID: {}", id);
@@ -22,12 +24,11 @@ pub async fn fetch_and_parse_chart(
     match handle_chart_request(&state, &id).await {
         Ok(bytes) => {
             log::info!("Chart {} ready ({} bytes)", id, bytes.len());
-            let mut response = (StatusCode::OK, bytes).into_response();
-            response.headers_mut().insert(
-                "content-type",
-                HeaderValue::from_static("application/octet-stream"),
-            );
-            response
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .body(Body::from(bytes))
+                .unwrap()
         }
         Err(e) => {
             log::error!("Error processing chart {}: {}", id, e);
@@ -43,11 +44,9 @@ async fn handle_chart_request(state: &AppState, id: &str) -> anyhow::Result<Vec<
         return test_chart::generate_test_chart();
     }
 
-    let client = reqwest::Client::new();
-
     // 1. Always fetch metadata (cheap, ~1KB) to get chartUpdated
     let info_url = format!("{}/chart/{}", state.args.api_base, id);
-    let info_resp = client.get(&info_url).send().await?;
+    let info_resp = state.client.get(&info_url).send().await?;
     if !info_resp.status().is_success() {
         return Err(anyhow::anyhow!(
             "Failed to fetch chart info: {}",
@@ -88,7 +87,7 @@ async fn handle_chart_request(state: &AppState, id: &str) -> anyhow::Result<Vec<
     }
 
     // 4. Download, parse, serialize — we are the worker
-    let result = process::process_chart_from_api(&client, &info_json).await;
+    let result = process::process_chart_from_api(&state.client, &info_json).await;
 
     // 5. Store or broadcast error, then clean up in-flight entry
     let tx = {
