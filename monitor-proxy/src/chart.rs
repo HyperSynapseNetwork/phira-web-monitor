@@ -46,7 +46,7 @@ async fn handle_chart_request(state: &AppState, id: &str) -> anyhow::Result<Vec<
 
     // 1. Always fetch metadata (cheap, ~1KB) to get chartUpdated
     let info_url = format!("{}/chart/{}", state.args.api_base, id);
-    let info_resp = state.client.get(&info_url).send().await?;
+    let info_resp = state.http_client.get(&info_url).send().await?;
     if !info_resp.status().is_success() {
         return Err(anyhow::anyhow!(
             "Failed to fetch chart info: {}",
@@ -87,7 +87,7 @@ async fn handle_chart_request(state: &AppState, id: &str) -> anyhow::Result<Vec<
     }
 
     // 4. Download, parse, serialize — we are the worker
-    let result = process::process_chart_from_api(&state.client, &info_json).await;
+    let result = process::process_chart_from_api(&state.http_client, &info_json).await;
 
     // 5. Store or broadcast error, then clean up in-flight entry
     let tx = {

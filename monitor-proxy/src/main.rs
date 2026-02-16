@@ -5,13 +5,12 @@
 //! 2. Server-side chart parsing (download -> unzip -> parse -> bincode)
 //! 3. Disk-based chart caching with in-flight request deduplication
 
-use axum::{http::Method, routing::get, routing::post, Router};
-use axum_extra::extract::cookie::Key;
+use axum::{http::Method, middleware, routing::get, routing::post, Router};
+use axum_extra::extract::cookie;
 use clap::Parser;
+use phira_mp_common::generate_secret_key;
 use reqwest::Client;
-use std::{
-    collections::HashMap, env, net::SocketAddr, os::unix::ffi::OsStrExt, path::PathBuf, sync::Arc,
-};
+use std::{collections::HashMap, env, net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{broadcast, Mutex};
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -60,33 +59,40 @@ pub struct Args {
 pub struct AppStateInner {
     /// CLI arguments
     pub args: Args,
-    /// http client
-    pub client: Client,
+
+    /// HTTP client
+    pub http_client: Client,
+
+    /// Room monitor client
+    pub room_monitor_client: rooms::RoomMonitorClient,
+
     /// In-flight task deduplication: chart_id → broadcast sender.
     /// Waiters receive Ok(()) on success (then read from disk), or Err(msg) on failure.
     pub in_flight: Mutex<HashMap<String, broadcast::Sender<Result<(), String>>>>,
+
     /// Secret key for cookie signing
-    pub key: Key,
+    pub cookie_key: cookie::Key,
 }
 
 pub struct AppState(Arc<AppStateInner>);
 
 impl AppState {
-    pub fn new(args: Args) -> Self {
-        let key = if args.debug {
-            Key::generate()
-        } else {
-            Key::from(
-                env::var_os("HSN_SECRET_KEY")
-                    .expect("environment variable HSN_SECRET_KEY not set")
-                    .as_bytes(),
-            )
-        };
+    pub async fn new(args: Args) -> Self {
+        let cookie_key = cookie::Key::from(
+            &generate_secret_key("cookie", 64).expect("failed to generate key for cookie"),
+        );
+        let http_client = Client::new();
+        let room_monitor_client = rooms::RoomMonitorClient::new(&args.mp_server)
+            .await
+            .expect("failed to create RoomMonitorClient");
+        let in_flight = Mutex::default();
+
         Self(Arc::new(AppStateInner {
             args,
-            client: Client::new(),
-            in_flight: Mutex::new(HashMap::new()),
-            key,
+            http_client,
+            room_monitor_client,
+            in_flight,
+            cookie_key,
         }))
     }
 }
@@ -104,9 +110,9 @@ impl Clone for AppState {
     }
 }
 
-impl axum::extract::FromRef<AppState> for Key {
+impl axum::extract::FromRef<AppState> for cookie::Key {
     fn from_ref(state: &AppState) -> Self {
-        state.key.clone()
+        state.cookie_key.clone()
     }
 }
 
@@ -147,7 +153,7 @@ async fn main() -> anyhow::Result<()> {
     log::info!("Cache Dir: {:?}", args.cache_dir);
 
     let port = args.port;
-    let state = AppState::new(args);
+    let state = AppState::new(args).await;
 
     // CORS configuration
     let cors = CorsLayer::new()
@@ -157,12 +163,14 @@ async fn main() -> anyhow::Result<()> {
 
     let public_routes = Router::new()
         .route("/chart/{id}", get(chart::fetch_and_parse_chart))
-        .route("/rooms", get(rooms::query_rooms))
-        .route("/rooms/{id}", get(rooms::query_room))
+        .route("/rooms/info", get(rooms::get_room_list))
+        .route("/rooms/info/{id}", get(rooms::get_room_by_id))
+        .route("/rooms/user/{id}", get(rooms::get_room_of_user))
+        .route("/rooms/listen", get(rooms::listen))
         .route("/auth/login", post(auth::login));
     let protected_routes = Router::new()
         .route("/auth/me", get(auth::get_me_profile))
-        .route_layer(axum::middleware::from_fn_with_state(
+        .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::auth_middleware,
         ));

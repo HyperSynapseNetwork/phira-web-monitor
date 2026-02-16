@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.21"
+tokio-stream = { version = "0.1", features = ["sync"] }
 axum = "0.8"
 axum-extra = { version = "0.12.5", features = ["cookie-private"]}
 reqwest = { version = "0.13", features = ["json"] }
@@ -26,5 +27,6 @@ mime_guess = "2.0.5"
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 time = "0.3.47"
+futures = "0.3"
 
 phira-mp-common = { path = "../../phira-mp/phira-mp-common" }

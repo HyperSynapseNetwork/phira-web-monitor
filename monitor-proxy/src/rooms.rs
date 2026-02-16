@@ -1,68 +1,68 @@
+use std::{convert::Infallible, time::Duration};
+
 use crate::{json_err, AppState};
-use anyhow::{Context, Result};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    response::{IntoResponse, Response},
+    response::{
+        sse::{Event, KeepAlive},
+        IntoResponse, Response, Sse,
+    },
     Json,
 };
-use serde_json::{json, Value};
+use serde_json::json;
 
-use tokio::{net::TcpStream, sync::oneshot};
+use phira_mp_common::RoomId;
 
-use phira_mp_common::{ClientCommand, RoomId, ServerCommand, Stream};
+mod client;
+pub use client::*;
 
-pub async fn query_rooms(State(state): State<AppState>) -> (StatusCode, Response) {
-    query_rooms_inner(&state.args.mp_server, None)
+pub async fn get_room_list(State(state): State<AppState>) -> (StatusCode, Response) {
+    state
+        .room_monitor_client
+        .get_room_list()
         .await
         .map(|s| (StatusCode::OK, Json(s).into_response()))
-        .unwrap_or_else(|e| {
-            log::error!("Error querying rooms: {e:?}");
-            (StatusCode::INTERNAL_SERVER_ERROR, json_err!("{e}"))
-        })
+        .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, json_err!("{e}")))
 }
 
-pub async fn query_room(
+pub async fn get_room_by_id(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> (StatusCode, Response) {
-    query_rooms_inner(&state.args.mp_server, Some(id))
+    let id = match RoomId::try_from(id) {
+        Ok(id) => id,
+        Err(e) => return (StatusCode::BAD_REQUEST, json_err!("invalid room id: {e}")),
+    };
+    state
+        .room_monitor_client
+        .get_room_by_id(id)
         .await
         .map(|s| (StatusCode::OK, Json(s).into_response()))
-        .unwrap_or_else(|e| {
-            log::error!("Error querying rooms: {e:?}");
-            (StatusCode::INTERNAL_SERVER_ERROR, json_err!("{e}"))
-        })
+        .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, json_err!("{e}")))
 }
 
-async fn query_rooms_inner(mp_server: &str, id: Option<String>) -> Result<Value> {
-    let (tx, rx) = oneshot::channel::<String>();
-    let stream = Stream::<ClientCommand, ServerCommand>::new(
-        Some(1),
-        TcpStream::connect(mp_server).await?,
-        Box::new({
-            let mut tx = Some(tx);
-            move |_, cmd| {
-                let tx = tx.take();
-                async move {
-                    let Some(tx) = tx else { return };
-                    if let ServerCommand::ResponseRooms(rooms_data) = cmd {
-                        let _ = tx.send(rooms_data);
-                    } else {
-                        log::warn!("Unknown command received: {cmd:?}");
-                    }
-                }
-            }
-        }),
+pub async fn get_room_of_user(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> (StatusCode, Response) {
+    state
+        .room_monitor_client
+        .get_room_of_user(id)
+        .await
+        .map(|s| (StatusCode::OK, Json(s).into_response()))
+        .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, json_err!("{e}")))
+}
+
+pub async fn listen(
+    State(state): State<AppState>,
+) -> (
+    StatusCode,
+    Sse<impl futures::Stream<Item = Result<Event, Infallible>>>,
+) {
+    (
+        StatusCode::OK,
+        Sse::new(state.room_monitor_client.listen_stream().await)
+            .keep_alive(KeepAlive::new().interval(Duration::from_secs(10))),
     )
-    .await?;
-    stream
-        .send(ClientCommand::QueryRooms {
-            id: match id {
-                Some(id) => Some(RoomId::try_from(id)?),
-                None => None,
-            },
-        })
-        .await?;
-    serde_json::from_str(&rx.await?).with_context(|| "invalid json value")
 }

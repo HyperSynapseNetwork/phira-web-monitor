@@ -24,7 +24,7 @@ pub async fn auth_middleware(
     let session: AuthSession =
         serde_json::from_str(cookie.value()).map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-    if session.expired_at < Utc::now() + Duration::seconds(60) {
+    if session.expire_at < Utc::now() + Duration::seconds(60) {
         // should refresh, but we don't know Phira's refresh api
         // suspect that they didn't implement this /oh
         return Err(StatusCode::UNAUTHORIZED);
@@ -45,7 +45,7 @@ pub async fn login(
     Json(payload): Json<LoginRequest>,
 ) -> (StatusCode, Response) {
     let resp = match state
-        .client
+        .http_client
         .post(format!("{}/login", state.args.api_base))
         .json(&payload)
         .send()
@@ -63,6 +63,7 @@ pub async fn login(
     if !resp.status().is_success() {
         return (StatusCode::UNAUTHORIZED, json_err!("invalid credentials"));
     }
+
     let resp = match resp.json::<PhiraLoginResponse>().await {
         Ok(resp) => resp,
         Err(e) => {
@@ -110,7 +111,7 @@ pub async fn get_me_profile(
 ) -> (StatusCode, Response) {
     let token = session.token;
     let resp = match state
-        .client
+        .http_client
         .get(format!("{}/me", state.args.api_base))
         .header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"))
         .send()
