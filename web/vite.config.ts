@@ -1,29 +1,25 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from "vite";
 
 export default defineConfig({
   server: {
     port: 3000,
     fs: {
       // Allow serving files from the monitor/pkg directory
-      allow: ['..'],
+      allow: [".."],
     },
     proxy: {
       // Proxy API requests to our proxy server
-      '/api': {
-        target: 'http://localhost:3080',
+      "/api": {
+        target: "http://localhost:3080",
         changeOrigin: true,
       },
-      '/chart-file': {
-        target: 'http://localhost:3080',
-        changeOrigin: true,
-      },
-      '/chart': {
-        target: 'http://localhost:3080',
+      "/chart": {
+        target: "http://localhost:3080",
         changeOrigin: true,
       },
     },
   },
   build: {
-    target: 'esnext',
+    target: "esnext",
   },
 });
