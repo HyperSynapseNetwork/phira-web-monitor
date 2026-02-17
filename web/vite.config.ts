@@ -9,10 +9,6 @@ export default defineConfig({
     },
     proxy: {
       // Proxy API requests to our proxy server
-      "/api": {
-        target: "http://localhost:3080",
-        changeOrigin: true,
-      },
       "/chart": {
         target: "http://localhost:3080",
         changeOrigin: true,
