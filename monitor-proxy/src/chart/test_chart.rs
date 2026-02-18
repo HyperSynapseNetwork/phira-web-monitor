@@ -1,6 +1,7 @@
-pub fn generate_test_chart() -> anyhow::Result<Vec<u8>> {
-    use monitor_common::core::{AnimFloat, Chart, ChartInfo, JudgeLine, Keyframe, Note, NoteKind};
+use anyhow::Result;
+use monitor_common::core::{AnimFloat, Chart, ChartInfo, JudgeLine, Keyframe, Note, NoteKind};
 
+pub fn generate_test_chart() -> Result<(ChartInfo, Chart)> {
     let mut line = JudgeLine::default();
     const HEIGHT_PER_SEC: f32 = 1.0;
 
@@ -45,9 +46,5 @@ pub fn generate_test_chart() -> anyhow::Result<Vec<u8>> {
         ..Default::default()
     };
 
-    use bincode::Options;
-    let encoded = bincode::options()
-        .with_varint_encoding()
-        .serialize(&(info, chart))?;
-    Ok(encoded)
+    Ok((info, chart))
 }

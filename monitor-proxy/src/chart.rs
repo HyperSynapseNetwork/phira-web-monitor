@@ -3,48 +3,65 @@ pub(crate) mod parse;
 mod process;
 mod test_chart;
 
-use crate::AppState;
-use anyhow::Context;
+use crate::{json_err, AppState};
+use anyhow::Result;
 use axum::{
     body::Body,
     extract::{Path, State},
     http::StatusCode,
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use reqwest::header;
-
-use tokio::sync::broadcast;
+use std::path::PathBuf;
+use tokio_util::io::ReaderStream;
 
 pub async fn fetch_and_parse_chart(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Response {
-    log::info!("Processing chart request for ID: {}", id);
+) -> (StatusCode, Response) {
+    log::info!("Processing chart request for ID: {id}");
 
     match handle_chart_request(&state, &id).await {
-        Ok(bytes) => {
-            log::info!("Chart {} ready ({} bytes)", id, bytes.len());
-            Response::builder()
-                .status(StatusCode::OK)
-                .header(header::CONTENT_TYPE, "application/octet-stream")
-                .body(Body::from(bytes))
-                .unwrap()
+        Ok(bin_path) => {
+            log::info!("Chart {id} ready, streaming from {bin_path:?}");
+            match tokio::fs::File::open(&bin_path).await {
+                Ok(file) => {
+                    let stream = ReaderStream::new(file);
+                    (
+                        StatusCode::OK,
+                        Response::builder()
+                            .header(header::CONTENT_TYPE, "application/octet-stream")
+                            .body(Body::from_stream(stream))
+                            .unwrap(),
+                    )
+                }
+                Err(e) => {
+                    log::error!("Failed to open cached file {bin_path:?}: {e}");
+                    (StatusCode::INTERNAL_SERVER_ERROR, json_err!("{e}"))
+                }
+            }
         }
         Err(e) => {
-            log::error!("Error processing chart {}: {}", id, e);
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e)).into_response()
+            log::error!("Error processing chart {id}: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, json_err!("{e}"))
         }
     }
 }
 
-async fn handle_chart_request(state: &AppState, id: &str) -> anyhow::Result<Vec<u8>> {
-    // Test chart bypasses everything
+async fn handle_chart_request(state: &AppState, id: &str) -> Result<PathBuf> {
+    // Test chart — write through cache so it also streams from disk
     if id == "test" {
         log::info!("Generating test chart...");
-        return test_chart::generate_test_chart();
+        let (info, chart) = test_chart::generate_test_chart()?;
+        // Use a fixed "test" entry with empty chart_updated (always regenerates)
+        let guard = match cache::acquire(&state.args.cache_dir, "test", "").await? {
+            cache::CacheResult::Hit(path) => return Ok(path),
+            cache::CacheResult::Miss(guard) => guard,
+        };
+        return guard.write("", &(info, chart));
     }
 
-    // 1. Always fetch metadata (cheap, ~1KB) to get chartUpdated
+    // 1. Fetch metadata (cheap, ~1KB) to get chartUpdated
     let info_url = format!("{}/chart/{}", state.args.api_base, id);
     let info_resp = state.http_client.get(&info_url).send().await?;
     if !info_resp.status().is_success() {
@@ -56,62 +73,19 @@ async fn handle_chart_request(state: &AppState, id: &str) -> anyhow::Result<Vec<
     let info_json: serde_json::Value = info_resp.json().await?;
     let chart_updated = info_json["chartUpdated"].as_str().unwrap_or("").to_string();
 
-    // 2. Check disk cache
-    if let Some(data) = cache::check(&state.args.cache_dir, id, &chart_updated) {
-        log::info!("Chart {} served from disk cache", id);
-        return Ok(data);
-    }
-
-    // 3. Check in-flight tasks / register ourselves
-    {
-        let mut in_flight = state.in_flight.lock().await;
-        if let Some(tx) = in_flight.get(id) {
-            // Someone else is already downloading this chart — wait for them
-            let mut rx = tx.subscribe();
-            drop(in_flight);
-            log::info!("Chart {} waiting for in-flight task", id);
-            match rx.recv().await {
-                Ok(Ok(())) => {
-                    // Task completed, read from disk
-                    return std::fs::read(cache::bin_path(&state.args.cache_dir, id))
-                        .with_context(|| "Failed to read cached result after in-flight wait");
-                }
-                Ok(Err(e)) => return Err(anyhow::anyhow!("In-flight task failed: {}", e)),
-                Err(e) => return Err(anyhow::anyhow!("Broadcast channel error: {}", e)),
-            }
+    // 2. Acquire cache lock — blocks if another request is already downloading this chart
+    match cache::acquire(&state.args.cache_dir, id, &chart_updated).await? {
+        cache::CacheResult::Hit(path) => {
+            log::info!("Chart {} served from cache", id);
+            Ok(path)
         }
-
-        // Register ourselves as the in-flight task
-        let (tx, _) = broadcast::channel(16);
-        in_flight.insert(id.to_string(), tx);
-    }
-
-    // 4. Download, parse, serialize — we are the worker
-    let result = process::process_chart_from_api(&state.http_client, &info_json).await;
-
-    // 5. Store or broadcast error, then clean up in-flight entry
-    let tx = {
-        let mut in_flight = state.in_flight.lock().await;
-        in_flight.remove(id)
-    };
-
-    match &result {
-        Ok(data) => {
-            if let Err(e) = cache::write(&state.args.cache_dir, id, &chart_updated, data) {
-                log::warn!("Failed to write disk cache for chart {}: {}", id, e);
-            } else {
-                log::info!("Chart {} cached to disk", id);
-            }
-            if let Some(tx) = tx {
-                let _ = tx.send(Ok(()));
-            }
-        }
-        Err(e) => {
-            if let Some(tx) = tx {
-                let _ = tx.send(Err(e.to_string()));
-            }
+        cache::CacheResult::Miss(guard) => {
+            log::info!("Chart {} cache miss, downloading...", id);
+            let (info, chart) =
+                process::process_chart_from_api(&state.http_client, &info_json).await?;
+            let path = guard.write(&chart_updated, &(info, chart))?;
+            log::info!("Chart {} cached to disk", id);
+            Ok(path)
         }
     }
-
-    result
 }

@@ -1,6 +1,6 @@
 use super::parse::{pbc, pec, pgr, rpe, ResourceLoader};
 use anyhow::Context;
-use monitor_common::core::{ChartFormat, ChartInfo};
+use monitor_common::core::{Chart, ChartFormat, ChartInfo};
 use std::io::{Cursor, Read};
 use std::sync::{Arc, Mutex};
 
@@ -32,7 +32,7 @@ impl ResourceLoader for ZipLoader {
 pub async fn process_chart_from_api(
     client: &reqwest::Client,
     info_json: &serde_json::Value,
-) -> anyhow::Result<Vec<u8>> {
+) -> anyhow::Result<(ChartInfo, Chart)> {
     let file_url = info_json["file"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("No file URL in chart info"))?;
@@ -137,12 +137,7 @@ pub async fn process_chart_from_api(
     // Load audio from pre-extracted bytes
     load_audio_into_chart(&info, music_data, hitsound_data, &mut chart);
 
-    // Serialize
-    use bincode::Options;
-    bincode::options()
-        .with_varint_encoding()
-        .serialize(&(info, chart))
-        .with_context(|| "Failed to serialize chart")
+    Ok((info, chart))
 }
 
 // ── Audio Extraction Helpers ───────────────────────────────────────────────────

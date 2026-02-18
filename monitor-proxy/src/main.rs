@@ -10,8 +10,7 @@ use axum_extra::extract::cookie;
 use clap::Parser;
 use phira_mp_common::generate_secret_key;
 use reqwest::Client;
-use std::{collections::HashMap, env, net::SocketAddr, path::PathBuf, sync::Arc};
-use tokio::sync::{broadcast, Mutex};
+use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
 use tower_http::{
     cors::{Any, CorsLayer},
     services::ServeDir,
@@ -66,10 +65,6 @@ pub struct AppStateInner {
     /// Room monitor client
     pub room_monitor_client: rooms::RoomMonitorClient,
 
-    /// In-flight task deduplication: chart_id → broadcast sender.
-    /// Waiters receive Ok(()) on success (then read from disk), or Err(msg) on failure.
-    pub in_flight: Mutex<HashMap<String, broadcast::Sender<Result<(), String>>>>,
-
     /// Secret key for cookie signing
     pub cookie_key: cookie::Key,
 }
@@ -85,13 +80,11 @@ impl AppState {
         let room_monitor_client = rooms::RoomMonitorClient::new(&args.mp_server)
             .await
             .expect("failed to create RoomMonitorClient");
-        let in_flight = Mutex::default();
 
         Self(Arc::new(AppStateInner {
             args,
             http_client,
             room_monitor_client,
-            in_flight,
             cookie_key,
         }))
     }
