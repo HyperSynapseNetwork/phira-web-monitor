@@ -16,9 +16,16 @@ use tower_http::{
     services::ServeDir,
 };
 
+// Re-export for phira_mp_macros::BinaryData derive (generates `crate::BinaryData` etc.)
+pub use phira_mp_common::{BinaryData, BinaryReader, BinaryWriter};
+// The derive macro also generates `-> Result<Self>` expecting `anyhow::Result`
+pub use anyhow::{bail, Result};
+
 mod auth;
 mod chart;
+mod live;
 mod rooms;
+mod utils;
 
 // ── CLI Arguments ──────────────────────────────────────────────────────────────
 
@@ -163,6 +170,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/login", post(auth::login));
     let protected_routes = Router::new()
         .route("/auth/me", get(auth::get_me_profile))
+        .route("/ws/live", get(live::live_ws))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::auth_middleware,

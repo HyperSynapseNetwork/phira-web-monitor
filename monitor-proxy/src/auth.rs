@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 mod session;
-use session::AuthSession;
+pub use session::AuthSession;
 
 pub async fn auth_middleware(
     State(_state): State<AppState>,
