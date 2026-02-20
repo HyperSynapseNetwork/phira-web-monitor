@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
 
 mod audio;
 mod engine;
-mod network;
+pub mod monitor;
 mod renderer;
 
 // For logging to JS console
@@ -18,7 +18,7 @@ extern "C" {
 
 #[macro_export]
 macro_rules! console_log {
-    ($($t:tt)*) => (log(&format_args!($($t)*).to_string()))
+    ($($t:tt)*) => (crate::log(&format_args!($($t)*).to_string()))
 }
 
 #[wasm_bindgen]
@@ -30,6 +30,7 @@ pub struct ChartPlayer {
     paused: bool,
     current_time: f32,
     last_update_time: Option<f64>,
+    api_base: String,
 }
 
 #[wasm_bindgen]
@@ -44,9 +45,14 @@ impl ChartPlayer {
     }
 
     #[wasm_bindgen(constructor)]
-    pub fn new(canvas_id: String) -> Result<ChartPlayer, JsValue> {
+    pub fn new(canvas_id: String, api_base: Option<String>) -> Result<ChartPlayer, JsValue> {
         console_error_panic_hook::set_once();
-        console_log!("ChartPlayer Initialized on Canvas '{}'", canvas_id);
+        let api_base = api_base.unwrap_or_default();
+        console_log!(
+            "ChartPlayer Initialized on Canvas '{}', API base: '{}'",
+            canvas_id,
+            api_base
+        );
 
         let renderer = renderer::Renderer::new(&canvas_id)?;
         let mut resource = Resource::new(renderer.context.width, renderer.context.height);
@@ -63,6 +69,7 @@ impl ChartPlayer {
             paused: true,
             current_time: 0.0,
             last_update_time: None,
+            api_base,
         };
         player.sync_hitsounds()?;
         Ok(player)
@@ -166,9 +173,10 @@ impl ChartPlayer {
 
     pub async fn load_chart(&mut self, id: String) -> Result<JsValue, JsValue> {
         let window = web_sys::window().ok_or("no window")?;
-        let resp_value =
-            wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(&format!("/chart/{}", id)))
-                .await?;
+        let resp_value = wasm_bindgen_futures::JsFuture::from(
+            window.fetch_with_str(&format!("{}/chart/{}", self.api_base, id)),
+        )
+        .await?;
         let resp: web_sys::Response = resp_value.dyn_into()?;
 
         if !resp.ok() {

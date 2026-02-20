@@ -32,4 +32,3 @@ futures = "0.3"
 fs2 = "0.4"
 
 phira-mp-common = { path = "../../phira-mp/phira-mp-common" }
-phira-mp-macros = { path = "../../phira-mp/phira-mp-macros" }

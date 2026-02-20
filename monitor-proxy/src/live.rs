@@ -1,5 +1,4 @@
 use crate::{auth::AuthSession, AppState};
-use anyhow::Result;
 use axum::{
     extract::{
         ws::{Message as WsMessage, WebSocket},
@@ -10,44 +9,12 @@ use axum::{
 };
 use futures::{stream::StreamExt, SinkExt};
 use log::{error, info};
+pub use monitor_common::live::{LiveEvent, WsCommand};
 use phira_mp_common::*;
-use phira_mp_macros::BinaryData;
 use tokio::sync::mpsc;
 
 mod client;
 pub use client::*;
-
-/// Commands sent from the browser to the proxy over WebSocket
-#[derive(Debug, BinaryData)]
-#[repr(u8)]
-pub enum WsCommand {
-    Join { room_id: RoomId },
-    Leave,
-}
-
-/// Events sent from the proxy to the browser over WebSocket
-#[derive(Clone, Debug, BinaryData)]
-#[repr(u8)]
-pub enum LiveEvent {
-    Authenticate(SResult<(UserInfo, Option<ClientRoomState>)>),
-    Join(SResult<JoinRoomResponse>),
-    Leave(SResult<()>),
-
-    Touches {
-        player: i32,
-        frames: Vec<TouchFrame>,
-    },
-    Judges {
-        player: i32,
-        judges: Vec<JudgeEvent>,
-    },
-    StateChange(RoomState),
-    UserJoin(UserInfo),
-    UserLeave {
-        user: i32,
-    },
-    Message(Message),
-}
 
 pub async fn live_ws(
     State(state): State<AppState>,

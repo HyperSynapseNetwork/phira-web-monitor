@@ -5,21 +5,19 @@
 //! 2. Server-side chart parsing (download -> unzip -> parse -> bincode)
 //! 3. Disk-based chart caching with in-flight request deduplication
 
-use axum::{http::Method, middleware, routing::get, routing::post, Router};
+use axum::{
+    http::{header, HeaderValue, Method},
+    middleware,
+    routing::get,
+    routing::post,
+    Router,
+};
 use axum_extra::extract::cookie;
 use clap::Parser;
 use phira_mp_common::generate_secret_key;
 use reqwest::Client;
 use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
-use tower_http::{
-    cors::{Any, CorsLayer},
-    services::ServeDir,
-};
-
-// Re-export for phira_mp_macros::BinaryData derive (generates `crate::BinaryData` etc.)
-pub use phira_mp_common::{BinaryData, BinaryReader, BinaryWriter};
-// The derive macro also generates `-> Result<Self>` expecting `anyhow::Result`
-pub use anyhow::{bail, Result};
+use tower_http::{cors::CorsLayer, services::ServeDir};
 
 mod auth;
 mod chart;
@@ -58,6 +56,10 @@ pub struct Args {
     /// Phira-mp server address
     #[arg(long, default_value = "localhost:12346")]
     pub mp_server: String,
+
+    /// Allowed CORS origin (used when --debug is not set)
+    #[arg(long)]
+    pub allowed_origin: Option<String>,
 }
 
 // ── Application State ──────────────────────────────────────────────────────────
@@ -156,10 +158,28 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState::new(args).await;
 
     // CORS configuration
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers(Any);
+    let cors = if state.args.debug {
+        // Debug: mirror the request Origin header back
+        // (Any + allow_credentials is forbidden by browsers and panics in tower-http)
+        CorsLayer::new()
+            .allow_origin(tower_http::cors::AllowOrigin::mirror_request())
+            .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+            .allow_headers([header::CONTENT_TYPE])
+            .allow_credentials(true)
+    } else {
+        let origin: HeaderValue = state
+            .args
+            .allowed_origin
+            .as_ref()
+            .expect("--allowed-origin must be set")
+            .parse()
+            .expect("invalid --allowed-origin value");
+        CorsLayer::new()
+            .allow_origin(origin)
+            .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+            .allow_headers([header::CONTENT_TYPE])
+            .allow_credentials(true)
+    };
 
     let public_routes = Router::new()
         .route("/chart/{id}", get(chart::fetch_and_parse_chart))

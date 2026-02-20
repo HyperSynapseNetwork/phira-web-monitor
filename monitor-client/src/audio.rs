@@ -116,4 +116,14 @@ impl AudioEngine {
     pub fn set_offset(&mut self, offset: f32) {
         self.offset = offset;
     }
+
+    /// Set music from a pre-decoded AudioBuffer (shared, zero-copy clone).
+    pub fn set_music_buffer(&mut self, buffer: AudioBuffer) {
+        self.music_buffer = Some(buffer);
+    }
+
+    /// Set a hitsound from a pre-decoded AudioBuffer (shared, zero-copy clone).
+    pub fn set_hitsound_buffer(&mut self, kind: HitSound, buffer: AudioBuffer) {
+        self.hitsound_buffers.insert(kind, buffer);
+    }
 }
