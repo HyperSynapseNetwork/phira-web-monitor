@@ -18,7 +18,7 @@ pub struct GameMonitorClient {
     state: Arc<GameMonitorState>,
     stream: Arc<Stream<ClientCommand, ServerCommand>>,
 
-    _ping_task_handle: JoinHandle<()>,
+    ping_task_handle: JoinHandle<()>,
 }
 
 struct GameMonitorState {
@@ -99,7 +99,7 @@ impl GameMonitorClient {
             room_state.clone(),
         ))));
 
-        let _ping_task_handle = tokio::spawn({
+        let ping_task_handle = tokio::spawn({
             let stream = Arc::clone(&stream);
             let state = Arc::clone(&state);
             async move {
@@ -131,7 +131,7 @@ impl GameMonitorClient {
         Ok(Self {
             state,
             stream,
-            _ping_task_handle,
+            ping_task_handle,
         })
     }
 
@@ -167,6 +167,17 @@ impl GameMonitorClient {
             .await?;
         let _ = self.state.event_tx.send(LiveEvent::Leave(res.clone()));
         Ok(res)
+    }
+
+    pub async fn send_ready(&self) -> Result<()> {
+        self.stream.send(ClientCommand::Ready).await?;
+        Ok(())
+    }
+}
+
+impl Drop for GameMonitorClient {
+    fn drop(&mut self) {
+        self.ping_task_handle.abort();
     }
 }
 

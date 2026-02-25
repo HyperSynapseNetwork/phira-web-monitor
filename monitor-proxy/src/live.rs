@@ -73,6 +73,11 @@ async fn handle_ws(state: AppState, session: AuthSession, socket: WebSocket) {
                                         error!("Leave room failed: {e:?}");
                                     }
                                 }
+                                WsCommand::Ready => {
+                                    if let Err(e) = client.send_ready().await {
+                                        error!("Send ready failed: {e:?}");
+                                    }
+                                }
                             }
                         }
                     }
@@ -84,5 +89,6 @@ async fn handle_ws(state: AppState, session: AuthSession, socket: WebSocket) {
     }
 
     info!("Live WS disconnected for user {}", session.id);
-    drop(client); // Explicit drop for clarity
+    let _ = client.leave_room().await;
+    drop(client);
 }

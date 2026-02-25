@@ -14,6 +14,7 @@ use phira_mp_macros::BinaryData;
 pub enum WsCommand {
     Join { room_id: RoomId },
     Leave,
+    Ready,
 }
 
 /// Events sent from the proxy to the browser over WebSocket
