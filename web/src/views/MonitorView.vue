@@ -88,23 +88,69 @@
         <section class="section">
           <h3>Scenes</h3>
           <div class="input-group">
-            <select
-              v-model.number="sceneUserId"
-              :disabled="!monitor || roomUsers.length === 0"
-            >
-              <option :value="null" disabled>Select player…</option>
-              <option
-                v-for="u in roomUsers"
-                :key="u.id"
-                :value="u.id"
-                :disabled="scenes.some((s) => s.userId === u.id)"
+            <div class="custom-select-wrapper">
+              <div
+                class="custom-select"
+                :class="{
+                  'is-disabled': !monitor || roomUsers.length === 0,
+                  'is-open': isSceneDropdownOpen,
+                }"
+                @click="
+                  if (monitor && roomUsers.length > 0)
+                    isSceneDropdownOpen = !isSceneDropdownOpen;
+                "
               >
-                {{ u.name }} (#{{ u.id }})
-                <template v-if="scenes.some((s) => s.userId === u.id)">
-                  ✓</template
+                <div
+                  class="custom-select-value"
+                  style="
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                  "
                 >
-              </option>
-            </select>
+                  <template v-if="sceneUserId == null">Select player…</template>
+                  <template v-else>
+                    {{
+                      roomUsers.find((u) => u.id === sceneUserId)?.name ||
+                      "Unknown"
+                    }}
+                    (#{{ sceneUserId }})
+                  </template>
+                </div>
+              </div>
+
+              <div
+                v-if="isSceneDropdownOpen"
+                class="custom-select-backdrop"
+                @click.stop="isSceneDropdownOpen = false"
+              ></div>
+
+              <div v-show="isSceneDropdownOpen" class="custom-select-menu">
+                <div class="custom-select-option custom-select-placeholder">
+                  Select player…
+                </div>
+                <div
+                  v-for="u in roomUsers"
+                  :key="u.id"
+                  class="custom-select-option"
+                  :class="{
+                    disabled: scenes.some((s) => s.userId === u.id),
+                    selected: sceneUserId === u.id,
+                  }"
+                  @click="
+                    if (!scenes.some((s) => s.userId === u.id)) {
+                      sceneUserId = u.id;
+                      isSceneDropdownOpen = false;
+                    }
+                  "
+                >
+                  {{ u.name }} (#{{ u.id }})
+                  <template v-if="scenes.some((s) => s.userId === u.id)">
+                    ✓</template
+                  >
+                </div>
+              </div>
+            </div>
             <button
               @click="addScene"
               :disabled="!monitor || sceneUserId == null"
@@ -234,6 +280,7 @@ const user = ref<UserInfo | null>(null);
 // Scene state
 const scenes = ref<SceneEntry[]>([]);
 const sceneUserId = ref<number | null>(null);
+const isSceneDropdownOpen = ref(false);
 const roomUsers = ref<RoomUser[]>([]);
 
 let monitor: GameMonitor | null = null;
@@ -325,15 +372,15 @@ function onCanvasRef(userId: number, el: HTMLCanvasElement | null) {
   nextTick(async () => {
     try {
       if (monitor) {
-        monitor.create_scene(userId, scene.canvasId);
+        monitor.attach_canvas(userId, scene.canvasId);
         if (defaultFileMap.value) {
           await monitor.load_scene_resource_pack(userId, defaultFileMap.value);
         }
-        log(`Scene created for player #${userId}`, "event");
+        log(`Scene attached for player #${userId}`, "event");
       }
     } catch (e) {
       scene.isCreated = false;
-      log(`Failed to create scene for #${userId}: ${e}`, "error");
+      log(`Failed to attach scene for #${userId}: ${e}`, "error");
     }
   });
 }
@@ -366,8 +413,8 @@ function removeSceneById(userId: number) {
   scenes.value.splice(idx, 1);
   if (monitor) {
     try {
-      monitor.destroy_scene(userId);
-      log(`Scene destroyed for player #${userId}`, "event");
+      monitor.detach_canvas(userId);
+      log(`Scene detached for player #${userId}`, "event");
     } catch (_) {}
   }
 }
@@ -376,7 +423,7 @@ function clearAllScenes() {
   for (const scene of scenes.value) {
     if (monitor) {
       try {
-        monitor.destroy_scene(scene.userId);
+        monitor.detach_canvas(scene.userId);
       } catch (_) {}
     }
   }
@@ -572,6 +619,7 @@ onUnmounted(() => {
   grid-template-columns: 320px 1fr;
   gap: 1rem;
   height: 100%;
+  color-scheme: dark;
 }
 
 /* ── Sidebar ──────────────────────────────────────────────────────── */
@@ -611,31 +659,105 @@ onUnmounted(() => {
   gap: 0.4rem;
 }
 .input-group input,
-.input-group select {
+.input-group .custom-select-wrapper {
   flex: 1;
   min-width: 0;
 }
 
-select {
-  appearance: none;
-  background: rgba(255, 255, 255, 0.06);
+input,
+button {
+  font-family: inherit;
+  font-size: 0.85rem;
+}
+
+input {
+  background: #0b1120;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+input:focus {
+  outline: none;
+  border-color: rgba(58, 123, 213, 0.5);
+  box-shadow: 0 0 0 2px rgba(58, 123, 213, 0.15);
+}
+
+.custom-select-wrapper {
+  position: relative;
+}
+.custom-select {
+  background: #0b1120;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
   color: #e2e8f0;
-  padding: 0.45rem 0.6rem;
-  font-size: 0.82rem;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.85rem;
   font-family: inherit;
   cursor: pointer;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2364748b'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 0.5rem center;
-  padding-right: 1.5rem;
+  background-position: right 0.6rem center;
+  padding-right: 1.8rem;
+  transition: all 0.2s;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  min-height: 33px;
 }
-select:focus {
+.custom-select.is-open,
+.custom-select:focus {
   outline: none;
   border-color: rgba(58, 123, 213, 0.5);
+  box-shadow: 0 0 0 2px rgba(58, 123, 213, 0.15);
 }
-select:disabled {
+.custom-select.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.custom-select-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+
+.custom-select-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #0b1120;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  z-index: 20;
+  max-height: 250px;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  padding: 4px;
+}
+
+.custom-select-option {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  color: #e2e8f0;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.15s;
+}
+.custom-select-option.custom-select-placeholder {
+  color: #64748b;
+  cursor: default;
+}
+.custom-select-option:hover:not(.disabled):not(.custom-select-placeholder) {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+.custom-select-option.selected {
+  background-color: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+.custom-select-option.disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }

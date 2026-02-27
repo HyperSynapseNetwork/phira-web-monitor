@@ -1,163 +1,236 @@
 //! Per-player rendering context for live monitoring.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use crate::{
     audio::AudioEngine,
     console_log,
     engine::{ChartRenderer, JudgeEventKind, Resource},
     renderer::Renderer,
+    time::TimeManager,
 };
-use monitor_common::core::{Chart, ChartInfo, HitSound, JudgeStatus, Judgement, NoteKind};
-use phira_mp_common::TouchFrame;
+use monitor_common::core::{
+    AnimVector, Chart, ChartInfo, HitSound, JudgeStatus, Judgement, Keyframe, NoteKind,
+};
+use phira_mp_common::{JudgeEvent, TouchFrame};
 use wasm_bindgen::prelude::*;
 
 // ── Touch overlay constants ─────────────────────────────────────────────────
 
-const TOUCH_COLORS: &[[f32; 3]] = &[
-    [0.3, 0.6, 1.0],
-    [1.0, 0.4, 0.4],
-    [0.3, 1.0, 0.5],
-    [1.0, 0.8, 0.2],
-    [0.8, 0.4, 1.0],
-    [1.0, 0.6, 0.3],
-];
+const TOUCH_COLOR: [f32; 3] = [1.0, 1.0, 1.0];
 const TOUCH_RADIUS: f32 = 0.015;
-const TOUCH_ALPHA: f32 = 0.5;
+const TOUCH_ALPHA: f32 = 0.6;
 const TOUCH_FADE_TIME: f32 = 0.3;
+/// Offset subtracted from target_time when seeking on canvas attach (seconds)
+const SEEK_OFFSET: f32 = 0.3;
+/// Start delay duration in seconds
+const START_DELAY_SECS: f64 = 4.0;
 
-/// A currently active or fading touch point.
+// ── ActiveTouch ─────────────────────────────────────────────────────────────
+
 struct ActiveTouch {
-    finger_id: i8,
-    x: f32,
-    y: f32,
-    color: [f32; 3],
-    /// None = currently pressed, Some(remaining) = fading out
-    fade_timer: Option<f32>,
+    anim: AnimVector,
+    start_time: f32,
+    last_update: f32,
+    /// None = currently pressed, Some(game_time) = touch ended at this time
+    end_time: Option<f32>,
 }
 
-/// Per-player rendering context for live monitoring.
+// ── RenderContext ───────────────────────────────────────────────────────────
+
+/// Heavy hardware-bound rendering state. Created lazily when a canvas is
+/// attached, dropped when the canvas is detached.
+pub struct RenderContext {
+    pub renderer: Renderer,
+    pub resource: Resource,
+    pub audio_engine: AudioEngine,
+}
+
+// ── GameScene ───────────────────────────────────────────────────────────────
+
+/// Per-player game state for live monitoring.
 ///
-/// Each `GameScene` owns its own Renderer, ChartRenderer, Resource, and
-/// AudioEngine. Judges and touches are pushed into pending buffers by
-/// `Monitor::tick()` and consumed during `render()`.
+/// Created headlessly for every player when the room is joined.
+/// Rendering components (`RenderContext`) are lazily initialized when a
+/// canvas is attached via `attach_canvas()`.
 pub struct GameScene {
     pub user_id: i32,
-    renderer: Renderer,
-    chart_renderer: ChartRenderer,
-    resource: Resource,
-    audio_engine: AudioEngine,
-    current_time: f32,
-    last_render_time: Option<f64>,
-    started: bool,
-    start_time: Option<f64>,
-    paused_for_judge: bool,
-    paused_time: f32,
-    audio_playing: bool,
-    pub target_time: Option<f32>,
-    pub unpause_signal: Option<f32>,
+
+    // Lazily initialized rendering context (WebGL + Audio)
+    render_ctx: Option<RenderContext>,
+    // Lazily initialized chart renderer (persists across attach/detach)
+    chart_renderer: Option<ChartRenderer>,
+
+    // Core simulation state
+    time: TimeManager,
+    /// If `Some(t)`, the scene is paused waiting for a judge event at game time `t`.
+    judge_pause_time: Option<f32>,
+    target_time: Option<f32>,
+    unpause_signal: Option<f32>,
+
+    // Wall-clock time (ms, from performance.now()) when start() was called
+    start_wall_time: Option<f64>,
 
     // MP event buffers
-    pub pending_judges: VecDeque<phira_mp_common::JudgeEvent>,
-    touch_points: Vec<ActiveTouch>,
+    pending_judges: VecDeque<phira_mp_common::JudgeEvent>,
+    /// Currently pressed touches, keyed by finger_id
+    active_touches: HashMap<i8, ActiveTouch>,
+    /// Touches that have been released and are fading out
+    fading_touches: Vec<ActiveTouch>,
 }
 
 impl GameScene {
-    /// Create a new scene for the given user, bound to a `<canvas>` element.
-    pub fn new(user_id: i32, canvas_id: &str) -> Result<Self, JsValue> {
+    /// Create a headless scene for the given user (no WebGL, no audio).
+    /// Events will be buffered until `attach_canvas()` is called.
+    pub fn new_headless(user_id: i32) -> Self {
+        let mut time = TimeManager::new();
+        time.pause(); // Paused until start() is called
+        GameScene {
+            user_id,
+            render_ctx: None,
+            chart_renderer: None,
+            time,
+            judge_pause_time: None,
+            target_time: None,
+            unpause_signal: None,
+            start_wall_time: None,
+            pending_judges: VecDeque::new(),
+            active_touches: HashMap::new(),
+            fading_touches: Vec::new(),
+        }
+    }
+
+    /// Reset all simulation state to initial values.
+    fn reset_state(&mut self) {
+        self.time.reset();
+        self.time.pause();
+        self.judge_pause_time = None;
+        self.target_time = None;
+        self.unpause_signal = None;
+        self.start_wall_time = None;
+        self.pending_judges.clear();
+        self.active_touches.clear();
+        self.fading_touches.clear();
+    }
+
+    /// Synchronize audio engine with the current chart's music and hitsounds.
+    fn sync_audio(&mut self) {
+        if let (Some(ctx), Some(cr)) = (&mut self.render_ctx, &self.chart_renderer) {
+            ctx.audio_engine.set_offset(cr.chart.offset);
+            if let Some(music) = &cr.chart.music {
+                let _ = ctx.audio_engine.set_music(music);
+            }
+            for (kind, clip) in &cr.chart.hitsounds {
+                let _ = ctx.audio_engine.set_hitsound(kind.clone(), clip);
+            }
+        }
+    }
+
+    /// Attach a `<canvas>` element to this scene, initializing WebGL and Audio.
+    /// If already attached, this is a no-op.
+    pub fn attach_canvas(&mut self, canvas_id: &str) -> Result<(), JsValue> {
+        if self.render_ctx.is_some() {
+            return Ok(());
+        }
+
         let renderer = Renderer::new(canvas_id)?;
         let mut resource = Resource::new(renderer.context.width, renderer.context.height);
         resource.load_defaults(&renderer.context)?;
+        let audio_engine = AudioEngine::new()?;
 
-        Ok(GameScene {
-            user_id,
+        self.render_ctx = Some(RenderContext {
             renderer,
-            chart_renderer: ChartRenderer::new(ChartInfo::default(), Chart::default()),
             resource,
-            audio_engine: AudioEngine::new()?,
-            current_time: 0.0,
-            last_render_time: None,
-            started: false,
-            start_time: None,
-            paused_for_judge: false,
-            paused_time: 0.0,
-            audio_playing: false,
-            target_time: None,
-            unpause_signal: None,
+            audio_engine,
+        });
 
-            pending_judges: VecDeque::new(),
-            touch_points: Vec::new(),
-        })
+        // If chart is already loaded, sync audio
+        self.sync_audio();
+
+        // If already started, seek to tracked game time so rendering picks up mid-game
+        if self.start_wall_time.is_some() {
+            if let Some(target) = self.target_time {
+                let seek_pos = (target - SEEK_OFFSET).max(0.0);
+                self.time.seek_to(seek_pos as f64);
+                console_log!(
+                    "GameScene[{}]: mid-game attach, seeking to {:.3}s (target={:.3})",
+                    self.user_id,
+                    seek_pos,
+                    target
+                );
+            }
+        }
+
+        console_log!("GameScene[{}]: canvas attached", self.user_id);
+        Ok(())
+    }
+
+    /// Detach the canvas, freeing WebGL context and AudioEngine.
+    /// The headless state (chart_renderer, event buffers, time) is preserved.
+    pub fn detach_canvas(&mut self) {
+        if let Some(mut ctx) = self.render_ctx.take() {
+            let _ = ctx.audio_engine.pause();
+        }
+        console_log!("GameScene[{}]: canvas detached", self.user_id);
+    }
+
+    /// Returns true if a rendering context is currently attached.
+    pub fn has_canvas(&self) -> bool {
+        self.render_ctx.is_some()
+    }
+
+    /// Returns true if a chart is currently loaded.
+    pub fn has_chart(&self) -> bool {
+        self.chart_renderer.is_some()
     }
 
     /// Load a pre-parsed chart into this scene.
     pub fn load_chart(&mut self, info: ChartInfo, chart: Chart) {
-        self.chart_renderer = ChartRenderer::new(info, chart);
-        self.chart_renderer.autoplay = false;
-        self.current_time = 0.0;
-        self.last_render_time = None;
-        self.started = false;
-        self.start_time = None;
-        self.paused_for_judge = false;
-        self.paused_time = 0.0;
-        self.audio_playing = false;
-        self.target_time = None;
-        self.unpause_signal = None;
-        self.pending_judges.clear();
-        self.touch_points.clear();
+        let mut cr = ChartRenderer::new(info, chart);
+        cr.autoplay = false;
+        self.chart_renderer = Some(cr);
 
-        // Safely parse audio offsets and chart-specific music / hitsounds
-        let _ = self.audio_engine.pause();
-        self.audio_engine
-            .set_offset(self.chart_renderer.chart.offset);
+        self.reset_state();
 
-        if let Some(music) = &self.chart_renderer.chart.music {
-            let _ = self.audio_engine.set_music(music);
+        // Pause audio and sync with the new chart
+        if let Some(ctx) = &mut self.render_ctx {
+            let _ = ctx.audio_engine.pause();
         }
-
-        for (kind, clip) in &self.chart_renderer.chart.hitsounds {
-            let _ = self.audio_engine.set_hitsound(kind.clone(), clip);
-        }
+        self.sync_audio();
 
         console_log!("GameScene[{}]: chart loaded", self.user_id);
     }
 
-    /// Clear the scene, blanking the canvas and discarding the chart.
+    /// Clear the scene, discarding chart and resetting state.
     pub fn clear(&mut self) {
-        self.started = false;
-        use monitor_common::core::{Chart, ChartInfo};
-        self.chart_renderer = ChartRenderer::new(ChartInfo::default(), Chart::default());
-        self.current_time = 0.0;
-        self.last_render_time = None;
-        self.start_time = None;
-        self.paused_for_judge = false;
-        self.paused_time = 0.0;
-        self.audio_playing = false;
-        self.target_time = None;
-        self.unpause_signal = None;
-        self.pending_judges.clear();
-        self.touch_points.clear();
+        self.chart_renderer = None;
+        self.reset_state();
         console_log!("GameScene[{}]: cleared", self.user_id);
     }
 
-    /// Load default texture resources into the scene's independent WebGL context
+    /// Load default texture resources into the scene's WebGL context.
     pub async fn load_resource_pack(
         &mut self,
         file_map: std::collections::HashMap<String, Vec<u8>>,
     ) -> Result<(), JsValue> {
+        let ctx = self
+            .render_ctx
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("No render context attached"))?;
+
         use crate::engine::ResourcePack;
-        let res_pack = ResourcePack::load(&self.renderer.context, file_map)
+        let res_pack = ResourcePack::load(&ctx.renderer.context, file_map)
             .await
             .map_err(|e| JsValue::from_str(&format!("Failed to load pack: {:?}", e)))?;
-        self.resource
-            .set_pack(&self.renderer.context, res_pack)
+        ctx.resource
+            .set_pack(&ctx.renderer.context, res_pack)
             .map_err(|e| JsValue::from_str(&format!("Failed to set pack: {}", e)))?;
         console_log!("GameScene[{}]: resource pack loaded", self.user_id);
 
-        // Synchronize default hitsounds directly from the loaded pack
-        if let Some(pack) = &self.resource.res_pack {
+        // Synchronize default hitsounds from the loaded pack
+        if let Some(pack) = &ctx.resource.res_pack {
             for (kind, clip) in &pack.hitsounds {
-                let _ = self.audio_engine.set_hitsound(kind.clone(), clip);
+                let _ = ctx.audio_engine.set_hitsound(kind.clone(), clip);
             }
         }
 
@@ -166,72 +239,71 @@ impl GameScene {
 
     /// Explicitly resume the WebAudio AudioContext to bypass browser autoplay policies.
     pub fn resume_audio_context(&mut self) {
-        // web_sys::AudioContext::resume() returns a Promise.
-        // We evaluate it simply by triggering it.
-        let _ = self.audio_engine.play(0.0).ok();
-        let _ = self.audio_engine.pause().ok();
-        console_log!(
-            "GameScene[{}]: explicit audio context resume request sent",
-            self.user_id
-        );
+        if let Some(ctx) = &mut self.render_ctx {
+            let _ = ctx.audio_engine.play(0.0).ok();
+            let _ = ctx.audio_engine.pause().ok();
+            console_log!(
+                "GameScene[{}]: explicit audio context resume request sent",
+                self.user_id
+            );
+        }
     }
 
     /// Begin chart playback (called when room state transitions to Playing).
     pub fn start(&mut self) {
-        if self.started {
+        if self.start_wall_time.is_some() {
             return;
         }
-        self.started = true;
-        self.start_time = None; // Will be set on first render
-        self.current_time = 0.0;
-        self.last_render_time = None;
-        // Don't play audio immediately; wait for start delay
-        self.audio_playing = false;
+        self.time.reset();
+        self.time.pause(); // Will resume after start delay
+        self.start_wall_time = Some(TimeManager::real_time_secs() * 1000.0);
         console_log!("GameScene[{}]: started", self.user_id);
     }
 
     pub fn clear_stale_notes(&mut self, player_time: f32) {
-        self.chart_renderer.clear_stale_notes(player_time);
+        if let Some(cr) = &mut self.chart_renderer {
+            cr.clear_stale_notes(player_time);
+        }
     }
 
-    /// Ingest touch frames into the active touch list.
+    pub fn push_judges(&mut self, judges: &[JudgeEvent]) {
+        self.pending_judges.extend(judges.iter().cloned());
+        if let Some(last) = judges.last() {
+            self.unpause_signal = Some(last.time);
+            self.target_time = Some(self.target_time.unwrap_or(last.time).max(last.time));
+        }
+    }
+
     pub fn push_touches(&mut self, frames: &[TouchFrame]) {
         if let Some(last) = frames.last() {
             let t = last.time;
             self.target_time = Some(self.target_time.unwrap_or(t).max(t));
         }
-
         for frame in frames {
-            // Mark existing touches not present in this frame as released
-            let mut seen: Vec<i8> = Vec::new();
             for &(finger_id, ref pos) in &frame.points {
-                seen.push(finger_id);
-                let x = pos.x();
-                let y = pos.y();
-                // Find existing or create new
-                if let Some(touch) = self
-                    .touch_points
-                    .iter_mut()
-                    .find(|t| t.finger_id == finger_id)
-                {
-                    touch.x = x;
-                    touch.y = y;
-                    touch.fade_timer = None; // still pressed
+                if finger_id < 0 {
+                    // Phira bit-inverts ID (!id) to signal touch end/cancel.
+                    let real_id = !finger_id;
+                    if let Some(mut touch) = self.active_touches.remove(&real_id) {
+                        touch.end_time = Some(frame.time);
+                        self.fading_touches.push(touch);
+                    }
                 } else {
-                    let color_idx = (finger_id.unsigned_abs() as usize) % TOUCH_COLORS.len();
-                    self.touch_points.push(ActiveTouch {
-                        finger_id,
-                        x,
-                        y,
-                        color: TOUCH_COLORS[color_idx],
-                        fade_timer: None,
-                    });
-                }
-            }
-            // Start fade for touches not in this frame
-            for touch in &mut self.touch_points {
-                if !seen.contains(&touch.finger_id) && touch.fade_timer.is_none() {
-                    touch.fade_timer = Some(TOUCH_FADE_TIME);
+                    let x = pos.x();
+                    let y = pos.y();
+                    let touch =
+                        self.active_touches
+                            .entry(finger_id)
+                            .or_insert_with(|| ActiveTouch {
+                                anim: AnimVector::default(),
+                                start_time: frame.time,
+                                last_update: frame.time,
+                                end_time: None,
+                            });
+                    touch.anim.x.keyframes.push(Keyframe::new(frame.time, x, 2));
+                    touch.anim.y.keyframes.push(Keyframe::new(frame.time, y, 2));
+                    touch.last_update = frame.time;
+                    touch.end_time = None;
                 }
             }
         }
@@ -239,88 +311,97 @@ impl GameScene {
 
     /// Full render pass. `now` is `performance.now()` in milliseconds.
     pub fn render(&mut self, now: f64) -> Result<(), JsValue> {
-        if !self.started {
-            self.renderer.clear();
-            self.renderer.flush();
+        // If no render context, nothing to draw
+        let ctx = match &mut self.render_ctx {
+            Some(ctx) => ctx,
+            None => return Ok(()),
+        };
+
+        if self.start_wall_time.is_none() {
+            ctx.renderer.clear();
+            ctx.renderer.flush();
             return Ok(());
         }
 
-        // Compute dt
-        let mut real_dt = 0.0f32;
-        if let Some(last) = self.last_render_time {
-            real_dt = ((now - last) / 1000.0) as f32;
-        }
-        self.last_render_time = Some(now);
+        // Rule 1: Smart Start Delay
+        // Normally wait START_DELAY_SECS after game start. But if we have target_time
+        // (i.e. mid-game join with buffered events), skip straight ahead.
+        if let Some(start_wall) = self.start_wall_time {
+            let delay_ms = START_DELAY_SECS * 1000.0;
+            let deadline = start_wall + delay_ms;
 
-        let mut chart_dt = real_dt;
+            // If we have buffered events, cap the deadline at the wall-clock
+            // time corresponding to target_time so we don't wait needlessly.
+            let effective_deadline = if let Some(target) = self.target_time {
+                let target_wall = start_wall + (target as f64 * 1000.0);
+                deadline.min(target_wall)
+            } else {
+                deadline
+            };
 
-        // Rule 1: Start Delay
-        if self.start_time.is_none() {
-            self.start_time = Some(now);
-        }
-        if let Some(st) = self.start_time {
-            if now - st < 5000.0 {
-                // Wait 5.0s before playing
-                self.current_time = 0.0;
-                self.resource.dt = 0.0;
+            if now < effective_deadline {
+                ctx.resource.dt = 0.0;
                 return Ok(());
-            } else if !self.audio_playing && !self.paused_for_judge {
-                // Time to start!
-                let _ = self.audio_engine.play(0.0);
-                self.audio_playing = true;
+            } else if self.time.paused() && self.judge_pause_time.is_none() {
+                // Delay elapsed, start the clock!
+                if let Some(target) = self.target_time {
+                    let seek_pos = (target - SEEK_OFFSET).max(0.0);
+                    self.time.seek_to(seek_pos as f64);
+                    self.time.resume();
+                    let _ = ctx.audio_engine.play(seek_pos.into());
+                } else {
+                    self.time.resume();
+                    let _ = ctx.audio_engine.play(0.0);
+                }
             }
+        } else {
+            return Ok(());
         }
 
         // Rule 2 & 3: Strict Pause & Resume with Delta
         if let Some(_ev_time) = self.unpause_signal.take() {
-            if self.paused_for_judge {
-                // Rule 3: Resume with delta 1.000s from pause_time
-                self.paused_for_judge = false;
-                self.current_time = (self.paused_time - 1.000).max(0.0);
+            if let Some(paused_time) = self.judge_pause_time.take() {
+                let resume_time = (paused_time - 1.000).max(0.0);
+                self.time.seek_to(resume_time as f64);
+                self.time.resume();
 
-                // Only clear notes that are TRULY stale relative to our new rewound time.
-                // This correctly avoids visually destroying notes between `current_time` and `ev_time`.
-                self.chart_renderer.clear_stale_notes(self.current_time);
+                if let Some(cr) = &mut self.chart_renderer {
+                    cr.clear_stale_notes(resume_time);
+                }
 
-                // Synchronize audio engine with rewound time
-                let _ = self.audio_engine.play(self.current_time.into());
-                self.audio_playing = true;
+                let _ = ctx.audio_engine.play(resume_time.into());
 
                 console_log!(
                     "GameMonitor: GameScene[{}]: resuming from {:.3} (paused at: {:.3})",
                     self.user_id,
-                    self.current_time,
-                    self.paused_time
+                    resume_time,
+                    paused_time
                 );
             }
         }
 
-        if self.paused_for_judge {
-            self.current_time = self.paused_time;
-            chart_dt = 0.0;
-        } else {
-            self.current_time = self.audio_engine.get_time();
+        let current_time = self.judge_pause_time.unwrap_or_else(|| self.time.now());
+
+        if self.judge_pause_time.is_some() {
+            ctx.resource.dt = 0.0;
         }
 
-        self.resource.dt = chart_dt;
+        ctx.renderer.clear();
+        ctx.renderer.begin_frame();
 
-        self.renderer.clear();
-        self.renderer.begin_frame();
-
-        let aspect = self.resource.aspect_ratio;
-        self.renderer.set_projection(&[
+        let aspect = ctx.resource.aspect_ratio;
+        ctx.renderer.set_projection(&[
             1.0, 0.0, 0.0, 0.0, 0.0, aspect, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ]);
 
-        // Update chart animations
-        self.chart_renderer
-            .update(&mut self.resource, self.current_time);
+        // Only render chart if chart_renderer exists
+        if let Some(cr) = &mut self.chart_renderer {
+            // Update chart animations
+            cr.update(&mut ctx.resource, current_time);
 
-        // Apply MP judge events via the hook
-        let pending_judges = &mut self.pending_judges;
-        let all_events = self
-            .chart_renderer
-            .update_judges(&self.resource, |chart, t| {
+            // Apply MP judge events via the hook
+            let pending_judges = &mut self.pending_judges;
+            let all_events = cr.update_judges(&ctx.resource, |chart, t| {
                 let mut hook_events = Vec::new();
                 while let Some(ev) = pending_judges.front() {
                     if ev.time > t {
@@ -377,105 +458,164 @@ impl GameScene {
                 hook_events
             });
 
-        // Play hitsounds
-        for event in &all_events {
-            match &event.kind {
-                JudgeEventKind::Judged(j) if matches!(j, Judgement::Miss | Judgement::Bad) => {}
-                JudgeEventKind::Judged(_) | JudgeEventKind::HoldStart => {
-                    let note =
-                        &self.chart_renderer.chart.lines[event.line_idx].notes[event.note_idx];
-                    let hitsound = note.hitsound.clone().unwrap_or_else(|| match note.kind {
-                        NoteKind::Click => HitSound::Click,
-                        NoteKind::Drag => HitSound::Drag,
-                        NoteKind::Flick => HitSound::Flick,
-                        _ => HitSound::Click,
-                    });
-                    let _ = self.audio_engine.play_hitsound(&hitsound);
+            // Play hitsounds
+            for event in &all_events {
+                match &event.kind {
+                    JudgeEventKind::Judged(j) if matches!(j, Judgement::Miss | Judgement::Bad) => {}
+                    JudgeEventKind::Judged(_) | JudgeEventKind::HoldStart => {
+                        let note = &cr.chart.lines[event.line_idx].notes[event.note_idx];
+                        let hitsound = note.hitsound.clone().unwrap_or_else(|| match note.kind {
+                            NoteKind::Click | NoteKind::Hold { .. } => HitSound::Click,
+                            NoteKind::Drag => HitSound::Drag,
+                            NoteKind::Flick => HitSound::Flick,
+                        });
+                        let _ = ctx.audio_engine.play_hitsound(&hitsound);
+                    }
+                    _ => {}
                 }
-                _ => {}
+            }
+
+            // Emit particles
+            cr.emit_particles(&mut ctx.resource, &all_events);
+
+            // Render chart
+            cr.render(&mut ctx.resource, &mut ctx.renderer);
+
+            // Rule 2: Strict Pause
+            if self.judge_pause_time.is_none() && cr.has_unjudged(current_time) {
+                self.judge_pause_time = Some(current_time);
+                self.time.pause();
+                let _ = ctx.audio_engine.pause();
+                console_log!(
+                    "GameMonitor: GameScene[{}]: paused for judge at {:.3}",
+                    self.user_id,
+                    current_time
+                );
             }
         }
 
-        // Emit particles
-        self.chart_renderer
-            .emit_particles(&mut self.resource, &all_events);
-
-        // Render chart
-        self.chart_renderer
-            .render(&mut self.resource, &mut self.renderer);
-
         // Render touch overlay
-        self.render_touches(real_dt);
+        self.render_touches(current_time);
 
-        // Rule 2: Strict Pause
-        // Check if we need to pause FOR THE NEXT FRAME, AFTER processing all events up to current_time
-        if !self.paused_for_judge && self.chart_renderer.has_unjudged(self.current_time) {
-            self.paused_for_judge = true;
-            self.paused_time = self.current_time;
-            let _ = self.audio_engine.pause();
-            self.audio_playing = false;
-            console_log!(
-                "GameMonitor: GameScene[{}]: paused for judge at {:.3} (limit: 0.200s exceeded)",
-                self.user_id,
-                self.current_time
-            );
+        if let Some(ctx) = &mut self.render_ctx {
+            ctx.renderer.flush();
         }
-
-        self.renderer.flush();
         Ok(())
     }
 
     /// Resize the scene's canvas.
     pub fn resize(&mut self, width: u32, height: u32) {
-        self.renderer.resize(width, height);
-        self.resource.width = width;
-        self.resource.height = height;
-        self.resource.aspect_ratio = width as f32 / height as f32;
+        if let Some(ctx) = &mut self.render_ctx {
+            ctx.renderer.resize(width, height);
+            ctx.resource.width = width;
+            ctx.resource.height = height;
+            ctx.resource.aspect_ratio = width as f32 / height as f32;
+        }
     }
 
     // ── Touch overlay rendering ─────────────────────────────────────────
 
-    fn render_touches(&mut self, dt: f32) {
-        let aspect = self.resource.aspect_ratio;
+    fn render_touches(&mut self, t: f32) {
+        let ctx = match &mut self.render_ctx {
+            Some(ctx) => ctx,
+            None => return,
+        };
+        let aspect = ctx.resource.aspect_ratio;
+
+        // Safety timeout: move stale active touches (no update for 2s) to fading
+        let stale_ids: Vec<i8> = self
+            .active_touches
+            .iter()
+            .filter(|(_, touch)| t - touch.last_update > 2.0)
+            .map(|(&id, _)| id)
+            .collect();
+        for id in stale_ids {
+            if let Some(mut touch) = self.active_touches.remove(&id) {
+                touch.end_time = Some(t);
+                self.fading_touches.push(touch);
+            }
+        }
 
         // Identity model matrix for overlay drawing
         const IDENTITY: [f32; 16] = [
             1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
 
-        // Update fade timers and remove expired touches
-        self.touch_points.retain_mut(|touch| {
-            if let Some(ref mut timer) = touch.fade_timer {
-                *timer -= dt;
-                if *timer <= 0.0 {
-                    return false; // remove
+        // Push orthographic projection
+        let proj_array: [f32; 16] = [
+            1.0 / aspect,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            -1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ];
+        let orig_proj = ctx.renderer.projection;
+        ctx.renderer.set_projection(&proj_array);
+
+        // Remove fully faded touches
+        self.fading_touches.retain(|touch| {
+            if let Some(end) = touch.end_time {
+                if t > end + TOUCH_FADE_TIME {
+                    return false;
                 }
             }
             true
         });
 
-        // Draw remaining touches
-        for touch in &self.touch_points {
-            let alpha = if let Some(timer) = touch.fade_timer {
-                TOUCH_ALPHA * (timer / TOUCH_FADE_TIME)
+        // Helper closure to draw a single touch
+        let draw_touch = |renderer: &mut Renderer, touch: &mut ActiveTouch| {
+            if t < touch.start_time {
+                return;
+            }
+            let alpha = if let Some(end) = touch.end_time {
+                if t < end {
+                    TOUCH_ALPHA
+                } else {
+                    let fade_progress = ((t - end) / TOUCH_FADE_TIME).min(1.0);
+                    TOUCH_ALPHA * (1.0 - fade_progress)
+                }
             } else {
                 TOUCH_ALPHA
             };
-
-            let [r, g, b] = touch.color;
-            // CompactPos stores (x, y * aspect), so divide y by aspect for rendering
-            let screen_y = touch.y / aspect;
-            self.renderer.draw_rect(
-                touch.x - TOUCH_RADIUS,
-                screen_y - TOUCH_RADIUS,
-                TOUCH_RADIUS * 2.0,
-                TOUCH_RADIUS * 2.0,
-                r,
-                g,
-                b,
+            if alpha <= 0.0 {
+                return;
+            }
+            touch.anim.set_time(t);
+            let pos = touch.anim.now();
+            let screen_y = -pos.y / aspect;
+            renderer.draw_circle(
+                pos.x,
+                screen_y,
+                TOUCH_RADIUS * 2.5,
+                TOUCH_COLOR[0],
+                TOUCH_COLOR[1],
+                TOUCH_COLOR[2],
                 alpha,
                 &IDENTITY,
             );
+        };
+
+        // Draw active touches
+        let ctx = self.render_ctx.as_mut().unwrap();
+        for touch in self.active_touches.values_mut() {
+            draw_touch(&mut ctx.renderer, touch);
         }
+        // Draw fading touches
+        for touch in &mut self.fading_touches {
+            draw_touch(&mut ctx.renderer, touch);
+        }
+
+        ctx.renderer.set_projection(&orig_proj);
     }
 }

@@ -1,9 +1,12 @@
 //! Standalone chart player — autoplay mode for the /play page.
 
-use crate::audio::AudioEngine;
-use crate::console_log;
-use crate::engine::{ChartRenderer, JudgeEventKind, Resource, ResourcePack};
-use crate::renderer::{Renderer, Texture};
+use crate::{
+    audio::AudioEngine,
+    console_log,
+    engine::{ChartRenderer, JudgeEventKind, Resource, ResourcePack},
+    renderer::{Renderer, Texture},
+    time::TimeManager,
+};
 use monitor_common::core::{
     Chart, ChartInfo, HitSound, JudgeLineKind, JudgeStatus, Judgement, NoteKind,
 };
@@ -16,9 +19,7 @@ pub struct ChartPlayer {
     chart_renderer: ChartRenderer,
     resource: Resource,
     audio_engine: AudioEngine,
-    paused: bool,
-    current_time: f32,
-    last_update_time: Option<f64>,
+    time: TimeManager,
     api_base: String,
 }
 
@@ -50,14 +51,15 @@ impl ChartPlayer {
         let info = ChartInfo::default();
         let chart = Chart::default();
 
+        let mut time = TimeManager::new();
+        time.pause();
+
         let mut player = ChartPlayer {
             renderer,
             chart_renderer: ChartRenderer::new(info, chart),
             resource,
             audio_engine: AudioEngine::new()?,
-            paused: true,
-            current_time: 0.0,
-            last_update_time: None,
+            time,
             api_base,
         };
         player.sync_hitsounds()?;
@@ -65,20 +67,17 @@ impl ChartPlayer {
     }
 
     pub fn pause(&mut self) -> Result<(), JsValue> {
-        self.paused = true;
-        self.last_update_time = None;
+        self.time.pause();
         self.audio_engine.pause()
     }
 
     pub fn resume(&mut self) -> Result<(), JsValue> {
-        self.paused = false;
-        self.last_update_time = None;
-        self.audio_engine.play(self.current_time)
+        self.time.resume();
+        self.audio_engine.play(self.time.now())
     }
 
     pub fn set_time(&mut self, time: f32) {
-        self.current_time = time;
-        self.last_update_time = None;
+        self.time.seek_to(time as f64);
 
         // Reset all judge states on seek
         for line in &mut self.chart_renderer.chart.lines {
@@ -89,7 +88,7 @@ impl ChartPlayer {
 
         // Force update chart state immediately
         self.chart_renderer
-            .update(&mut self.resource, self.current_time);
+            .update(&mut self.resource, self.time.now());
     }
 
     pub fn set_autoplay(&mut self, flag: bool) {
@@ -97,30 +96,28 @@ impl ChartPlayer {
     }
 
     pub fn render(&mut self) -> Result<(), JsValue> {
-        let now = web_sys::window().unwrap().performance().unwrap().now();
-
-        let mut dt = 0.0;
-        if !self.paused {
-            self.current_time = self.audio_engine.get_time();
-            if let Some(last) = self.last_update_time {
-                dt = (now - last) as f32 / 1000.0;
-            }
-            self.last_update_time = Some(now);
-        }
-        self.resource.dt = dt;
+        let current_time = if self.time.paused() {
+            self.resource.dt = 0.0;
+            self.time.now()
+        } else {
+            // Use audio engine time as the authoritative source when playing
+            let audio_time = self.audio_engine.get_time();
+            // Sync TimeManager to audio clock to keep them aligned
+            self.time.seek_to(audio_time as f64);
+            self.resource.dt = 1.0 / 60.0; // Fixed dt approximation for particles
+            audio_time
+        };
 
         self.renderer.clear();
         self.renderer.begin_frame();
 
         let aspect = self.resource.aspect_ratio;
-        let y_scale = aspect;
 
         self.renderer.set_projection(&[
-            1.0, 0.0, 0.0, 0.0, 0.0, y_scale, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 0.0, 0.0, aspect, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ]);
 
-        self.chart_renderer
-            .update(&mut self.resource, self.current_time);
+        self.chart_renderer.update(&mut self.resource, current_time);
 
         let autoplay = self.chart_renderer.autoplay;
         let events = self
@@ -267,9 +264,8 @@ impl ChartPlayer {
         self.chart_renderer = ChartRenderer::new(info.clone(), chart);
         self.chart_renderer.autoplay = autoplay;
         self.resource = resource;
-        self.current_time = 0.0;
-        self.paused = true;
-        self.last_update_time = None;
+        self.time.seek_to(0.0);
+        self.time.pause();
 
         // Load Audio into Engine
         self.audio_engine.pause()?;

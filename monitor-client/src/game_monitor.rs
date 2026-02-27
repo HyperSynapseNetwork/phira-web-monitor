@@ -136,21 +136,37 @@ impl GameMonitor {
         self.send_command(&WsCommand::Leave)
     }
 
-    /// Create a GameScene for the given user, bound to a `<canvas>` element.
-    pub fn create_scene(&mut self, user_id: i32, canvas_id: &str) -> Result<(), JsValue> {
-        let mut scene = GameScene::new(user_id, canvas_id)?;
+    /// Attach a `<canvas>` element to an existing headless scene.
+    /// If no scene exists for this user, creates a headless one first.
+    pub fn attach_canvas(&mut self, user_id: i32, canvas_id: &str) -> Result<(), JsValue> {
+        // Ensure a headless scene exists
+        self.scenes
+            .entry(user_id)
+            .or_insert_with(|| GameScene::new_headless(user_id));
 
-        // Immediately load chart if we already have it
+        let scene = self.scenes.get_mut(&user_id).unwrap();
+
+        // Immediately load chart if we already have it and scene doesn't have one
         if let (Some(info), Some(data)) = (&self.chart_info, &self.chart_data) {
-            scene.load_chart(info.clone(), data.clone());
+            if !scene.has_chart() {
+                scene.load_chart(info.clone(), data.clone());
+            }
         }
 
-        console_log!("GameMonitor: created scene for user {}", user_id);
-        self.scenes.insert(user_id, scene);
+        scene.attach_canvas(canvas_id)?;
+        console_log!("GameMonitor: attached canvas for user {}", user_id);
         Ok(())
     }
 
-    /// Remove the GameScene for the given user.
+    /// Detach the canvas from a scene (frees WebGL + Audio, keeps headless state).
+    pub fn detach_canvas(&mut self, user_id: i32) {
+        if let Some(scene) = self.scenes.get_mut(&user_id) {
+            scene.detach_canvas();
+            console_log!("GameMonitor: detached canvas for user {}", user_id);
+        }
+    }
+
+    /// Fully remove the GameScene for the given user (e.g. user left the room).
     pub fn destroy_scene(&mut self, user_id: i32) {
         if self.scenes.remove(&user_id).is_some() {
             console_log!("GameMonitor: destroyed scene for user {}", user_id);
@@ -221,6 +237,7 @@ impl GameMonitor {
                 }
                 LiveEvent::Join(Ok(resp)) => {
                     console_log!("GameMonitor: joined room, {} users", resp.users.len());
+                    // Create headless scenes for all users in the room
                     for user in &resp.users {
                         console_log!(
                             "  user: {} (id={}), monitor={}",
@@ -228,6 +245,9 @@ impl GameMonitor {
                             user.id,
                             user.monitor
                         );
+                        self.scenes
+                            .entry(user.id)
+                            .or_insert_with(|| GameScene::new_headless(user.id));
                     }
                     if let RoomState::SelectChart(Some(id)) = resp.state {
                         self.selected_chart_id = Some(id);
@@ -246,10 +266,6 @@ impl GameMonitor {
                     console_log!("GameMonitor: state change: {:?}", state);
                     if matches!(state, RoomState::Playing) {
                         self.start_all_scenes();
-                    } else if matches!(state, RoomState::SelectChart(_)) {
-                        for scene in self.scenes.values_mut() {
-                            scene.clear();
-                        }
                     }
                     if matches!(state, RoomState::WaitingForReady) {
                         if let Some(id) = self.selected_chart_id {
@@ -288,32 +304,29 @@ impl GameMonitor {
                         info.id,
                         info.monitor
                     );
+                    // Create headless scene for the new user
+                    self.scenes
+                        .entry(info.id)
+                        .or_insert_with(|| GameScene::new_headless(info.id));
                 }
                 LiveEvent::UserLeave { user } => {
                     console_log!("GameMonitor: user left: id={}", user);
                     self.destroy_scene(*user);
                 }
                 LiveEvent::Touches { player, frames } => {
+                    for f in frames {
+                        console_log!("GameMonitor: TouchFrame received for #{player}: {f:?}");
+                    }
                     if let Some(scene) = self.scenes.get_mut(player) {
                         scene.push_touches(frames);
                     }
                 }
                 LiveEvent::Judges { player, judges } => {
                     for j in judges {
-                        console_log!(
-                            "GameMonitor: JudgeEvent for #{}: note ({}, {}) at {:.3}s -> {:?}",
-                            player,
-                            j.line_id,
-                            j.note_id,
-                            j.time,
-                            j.judgement
-                        );
+                        console_log!("GameMonitor: JudgeEvent for #{player}: {j:?}");
                     }
                     if let Some(scene) = self.scenes.get_mut(player) {
-                        scene.pending_judges.extend(judges.iter().cloned());
-                        if let Some(last) = judges.last() {
-                            scene.unpause_signal = Some(last.time);
-                        }
+                        scene.push_judges(judges);
                     }
                 }
                 LiveEvent::Message(msg) => {
@@ -326,9 +339,11 @@ impl GameMonitor {
             }
         }
 
-        // Render all active scenes
+        // Render only scenes that have a canvas attached
         for scene in self.scenes.values_mut() {
-            scene.render(timestamp)?;
+            if scene.has_canvas() {
+                scene.render(timestamp)?;
+            }
         }
 
         Ok(())

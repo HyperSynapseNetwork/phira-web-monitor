@@ -148,7 +148,7 @@ impl ChartRenderer {
                     continue;
                 }
                 if matches!(note.judge, JudgeStatus::NotJudged) && t - note.time > limit {
-                    console_log!("Note ({line_idx}, {note_idx}) unjudged: {:?}", note.kind);
+                    console_log!("GameMonitor: found unjudged Note ({line_idx}, {note_idx})");
                     return true;
                 }
             }

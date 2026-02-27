@@ -116,7 +116,7 @@ fn draw_simple_note(
                     0.0
                 }
             } else {
-                let fade = 1.0 - (t - note.time) / 1.6;
+                let fade = 1.0 - (t - note.time) / 0.16;
                 fade.clamp(0.0, 1.0)
             }
         };

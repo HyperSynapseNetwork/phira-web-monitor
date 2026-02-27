@@ -5,6 +5,7 @@ mod chart_player;
 mod engine;
 pub mod game_monitor;
 mod renderer;
+pub mod time;
 
 // For logging to JS console
 #[wasm_bindgen]
