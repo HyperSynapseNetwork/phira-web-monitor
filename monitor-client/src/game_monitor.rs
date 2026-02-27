@@ -166,6 +166,13 @@ impl GameMonitor {
         }
     }
 
+    /// Resize a specific scene's canvas.
+    pub fn resize_scene(&mut self, user_id: i32, width: u32, height: u32) {
+        if let Some(scene) = self.scenes.get_mut(&user_id) {
+            scene.resize(width, height);
+        }
+    }
+
     /// Fully remove the GameScene for the given user (e.g. user left the room).
     pub fn destroy_scene(&mut self, user_id: i32) {
         if self.scenes.remove(&user_id).is_some() {
@@ -347,6 +354,12 @@ impl GameMonitor {
         }
 
         Ok(())
+    }
+
+    /// Check if the WebSocket connection is still alive (CONNECTING or OPEN).
+    /// Returns false only when the socket is CLOSING or CLOSED.
+    pub fn is_connected(&self) -> bool {
+        self.ws.ready_state() <= WebSocket::OPEN
     }
 
     /// Close the WebSocket connection.

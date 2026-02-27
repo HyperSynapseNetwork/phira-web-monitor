@@ -22,9 +22,9 @@ const TOUCH_RADIUS: f32 = 0.015;
 const TOUCH_ALPHA: f32 = 0.6;
 const TOUCH_FADE_TIME: f32 = 0.3;
 /// Offset subtracted from target_time when seeking on canvas attach (seconds)
-const SEEK_OFFSET: f32 = 0.3;
+const SEEK_OFFSET: f32 = 0.1;
 /// Start delay duration in seconds
-const START_DELAY_SECS: f64 = 4.0;
+const START_DELAY_SECS: f64 = 4.5;
 
 // ── ActiveTouch ─────────────────────────────────────────────────────────────
 
@@ -505,11 +505,36 @@ impl GameScene {
 
     /// Resize the scene's canvas.
     pub fn resize(&mut self, width: u32, height: u32) {
+        let screen_ratio = width as f32 / height as f32;
+        let design_ratio = self
+            .chart_renderer
+            .as_ref()
+            .map(|cr| cr.info.aspect_ratio)
+            .unwrap_or(16.0 / 9.0);
+
+        // Cap at design ratio (match Phira's non-fix mode)
+        let aspect_ratio = design_ratio.min(screen_ratio);
+
+        // Compute letterboxed viewport
+        let (vp_w, vp_h) = if screen_ratio > aspect_ratio {
+            let vp_w = (height as f32 * aspect_ratio).round() as u32;
+            (vp_w, height)
+        } else {
+            let vp_h = (width as f32 / aspect_ratio).round() as u32;
+            (width, vp_h)
+        };
+
+        // Center the viewport
+        let vp_x = (width - vp_w) / 2;
+        let vp_y = (height - vp_h) / 2;
+
         if let Some(ctx) = &mut self.render_ctx {
             ctx.renderer.resize(width, height);
+            ctx.renderer
+                .set_viewport(vp_x as i32, vp_y as i32, vp_w, vp_h);
             ctx.resource.width = width;
             ctx.resource.height = height;
-            ctx.resource.aspect_ratio = width as f32 / height as f32;
+            ctx.resource.aspect_ratio = aspect_ratio;
         }
     }
 

@@ -70,6 +70,10 @@ impl Renderer {
         self.context.resize(width, height);
     }
 
+    pub fn set_viewport(&mut self, x: i32, y: i32, width: u32, height: u32) {
+        self.context.set_viewport(x, y, width, height);
+    }
+
     pub fn begin_frame(&mut self) {
         self.shader_manager.use_program(&self.context, "default");
         // Ensure u_texture is set to unit 0

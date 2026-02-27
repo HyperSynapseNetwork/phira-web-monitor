@@ -189,10 +189,34 @@ impl ChartPlayer {
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
+        if width == 0 || height == 0 {
+            return;
+        }
+        let screen_ratio = width as f32 / height as f32;
+        let design_ratio = self.chart_renderer.info.aspect_ratio;
+
+        // Cap at design ratio
+        let aspect_ratio = design_ratio.min(screen_ratio);
+
+        // Compute letterboxed viewport
+        let (vp_w, vp_h) = if screen_ratio > aspect_ratio {
+            let vp_w = (height as f32 * aspect_ratio).round() as u32;
+            (vp_w, height)
+        } else {
+            let vp_h = (width as f32 / aspect_ratio).round() as u32;
+            (width, vp_h)
+        };
+
+        // Center the viewport
+        let vp_x = (width - vp_w) / 2;
+        let vp_y = (height - vp_h) / 2;
+
         self.renderer.resize(width, height);
+        self.renderer
+            .set_viewport(vp_x as i32, vp_y as i32, vp_w, vp_h);
         self.resource.width = width;
         self.resource.height = height;
-        self.resource.aspect_ratio = width as f32 / height as f32;
+        self.resource.aspect_ratio = aspect_ratio;
     }
 
     pub async fn load_chart(&mut self, id: String) -> Result<JsValue, JsValue> {
@@ -225,7 +249,9 @@ impl ChartPlayer {
 
         let existing_pack = self.resource.res_pack.take();
         let renderer = &self.renderer;
-        let mut resource = Resource::new(renderer.context.width, renderer.context.height);
+        let w = renderer.context.width.max(1);
+        let h = renderer.context.height.max(1);
+        let mut resource = Resource::new(w, h);
         resource.load_defaults(&renderer.context)?;
 
         if let Some(pack) = existing_pack {

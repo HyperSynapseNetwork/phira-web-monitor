@@ -16,6 +16,7 @@
     "@vitejs/plugin-vue": "^6.0.4",
     "jszip": "^3.10.1",
     "monitor-client": "file:./pkg",
+    "naive-ui": "^2.43.2",
     "vue": "^3.5.28"
   }
 }

@@ -2,150 +2,117 @@
   <div class="monitor-page">
     <!-- Left Sidebar: Controls -->
     <aside class="sidebar">
-      <div class="card sidebar-card">
+      <n-card
+        class="sidebar-card"
+        content-style="display:flex;flex-direction:column;padding:1.25rem;"
+      >
         <!-- Auth Section -->
         <section class="section">
-          <h3>Authentication</h3>
+          <n-text depth="3" class="section-title">Authentication</n-text>
           <div v-if="user" class="auth-info">
             <div class="user-row">
-              <span class="user-name">{{ user.username }}</span>
-              <span class="user-id-tag">#{{ user.phira_id }}</span>
+              <n-text strong>{{ user.username }}</n-text>
+              <n-text depth="3" style="font-size: 0.75rem"
+                >#{{ user.phira_id }}</n-text
+              >
             </div>
-            <div class="user-rks">RKS {{ user.phira_rks.toFixed(2) }}</div>
+            <n-text type="info" style="font-size: 0.78rem">
+              RKS {{ user.phira_rks.toFixed(2) }}
+            </n-text>
           </div>
           <template v-else>
-            <input
-              type="text"
-              v-model="email"
+            <n-input
+              v-model:value="email"
               placeholder="Email"
-              class="auth-input"
+              style="margin-bottom: 0.4rem"
             />
             <div class="input-group">
-              <input
+              <n-input
+                v-model:value="password"
                 type="password"
-                v-model="password"
+                show-password-on="click"
                 placeholder="Password"
+                style="flex: 1"
                 @keydown.enter="login"
               />
-              <button @click="login" :disabled="loggingIn">
-                {{ loggingIn ? "..." : "Login" }}
-              </button>
+              <n-button type="primary" :loading="loggingIn" @click="login">
+                Login
+              </n-button>
             </div>
-            <div v-if="authError" class="field-error">{{ authError }}</div>
+            <n-text v-if="authError" type="error" style="font-size: 0.78rem">
+              {{ authError }}
+            </n-text>
           </template>
         </section>
 
-        <hr class="divider" />
+        <n-divider />
 
         <!-- Connection Section -->
         <section class="section">
-          <h3>Connection</h3>
+          <n-text depth="3" class="section-title">Connection</n-text>
           <div class="status-dot" :class="wsState">
             <span class="dot"></span>
             {{ wsLabel }}
           </div>
           <div class="input-group">
-            <button
-              @click="connect"
-              :disabled="!user || wsState === 'connected'"
+            <n-button
+              type="primary"
               style="flex: 1"
+              :disabled="!user || wsState === 'connected'"
+              @click="connect"
             >
               Connect
-            </button>
-            <button
-              class="btn-danger"
-              @click="disconnect"
+            </n-button>
+            <n-button
+              type="error"
+              quaternary
+              class="disconnect-btn"
               :disabled="wsState !== 'connected'"
+              @click="disconnect"
             >
               ×
-            </button>
+            </n-button>
           </div>
         </section>
 
-        <hr class="divider" />
+        <n-divider />
 
         <!-- Room Section -->
         <section class="section">
-          <h3>Room</h3>
+          <n-text depth="3" class="section-title">Room</n-text>
           <div class="input-group">
-            <input type="text" v-model="roomId" placeholder="Room ID" />
-            <button @click="joinRoom" :disabled="wsState !== 'connected'">
-              Join
-            </button>
-            <button
-              class="btn-secondary"
-              @click="leaveRoom"
+            <n-input
+              v-model:value="roomId"
+              placeholder="Room ID"
+              style="flex: 1"
+            />
+            <n-button
+              type="primary"
               :disabled="wsState !== 'connected'"
+              @click="joinRoom"
             >
+              Join
+            </n-button>
+            <n-button :disabled="wsState !== 'connected'" @click="leaveRoom">
               Leave
-            </button>
+            </n-button>
           </div>
         </section>
 
-        <hr class="divider" />
+        <n-divider />
 
         <!-- Player Monitor Section -->
         <section class="section">
-          <h3>Monitor</h3>
-          <div class="custom-select-wrapper">
-            <div
-              class="custom-select"
-              :class="{
-                'is-disabled': !monitor || roomUsers.length === 0,
-                'is-open': isSceneDropdownOpen,
-              }"
-              @click="
-                if (monitor && roomUsers.length > 0)
-                  isSceneDropdownOpen = !isSceneDropdownOpen;
-              "
-            >
-              <div
-                class="custom-select-value"
-                style="
-                  white-space: nowrap;
-                  overflow: hidden;
-                  text-overflow: ellipsis;
-                "
-              >
-                <template v-if="selectedUserId == null"
-                  >Select player…</template
-                >
-                <template v-else>
-                  {{
-                    roomUsers.find((u) => u.id === selectedUserId)?.name ||
-                    "Unknown"
-                  }}
-                  (#{{ selectedUserId }})
-                </template>
-              </div>
-            </div>
-
-            <div
-              v-if="isSceneDropdownOpen"
-              class="custom-select-backdrop"
-              @click.stop="isSceneDropdownOpen = false"
-            ></div>
-
-            <div v-show="isSceneDropdownOpen" class="custom-select-menu">
-              <div class="custom-select-option custom-select-placeholder">
-                Select player…
-              </div>
-              <div
-                v-for="u in roomUsers"
-                :key="u.id"
-                class="custom-select-option"
-                :class="{ selected: selectedUserId === u.id }"
-                @click="
-                  selectPlayer(u.id);
-                  isSceneDropdownOpen = false;
-                "
-              >
-                {{ u.name }} (#{{ u.id }})
-              </div>
-            </div>
-          </div>
+          <n-text depth="3" class="section-title">Monitor</n-text>
+          <n-select
+            v-model:value="selectedUserId"
+            :options="playerOptions"
+            placeholder="Select player…"
+            :disabled="!monitor || roomUsers.length === 0"
+            @update:value="selectPlayer"
+          />
         </section>
-      </div>
+      </n-card>
     </aside>
 
     <!-- Right: Scene + Log -->
@@ -154,36 +121,53 @@
       <div class="scene-area">
         <div v-if="activeScene" class="scene-display">
           <div class="scene-header">
-            <span class="scene-label">
+            <n-text depth="3" style="font-size: 0.72rem; font-weight: 600">
               {{
                 roomUsers.find((u) => u.id === activeScene!.userId)?.name ||
                 "Player"
               }}
               (#{{ activeScene!.userId }})
-            </span>
+            </n-text>
           </div>
           <canvas
             :id="activeScene.canvasId"
             :ref="
-              (el) =>
-                onCanvasRef(activeScene!.userId, el as HTMLCanvasElement | null)
+              (el) => {
+                if (activeScene)
+                  onCanvasRef(
+                    activeScene.userId,
+                    el as HTMLCanvasElement | null,
+                  );
+              }
             "
             class="scene-canvas"
           ></canvas>
         </div>
         <div v-else class="scene-empty">
-          <div class="scene-empty-text">
+          <n-text depth="3" italic style="font-size: 0.85rem">
             Select a player from the sidebar to start monitoring.
-          </div>
+          </n-text>
         </div>
       </div>
 
       <!-- Event Log -->
-      <div class="card log-card">
-        <h3>
-          Event Log
-          <button class="btn-clear" @click="clearLog">Clear</button>
-        </h3>
+      <n-card
+        class="log-card"
+        content-style="display:flex;flex-direction:column;flex:1;min-height:0;padding:0.75rem;"
+      >
+        <div
+          style="
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.4rem;
+          "
+        >
+          <n-text depth="3" class="section-title" style="margin-bottom: 0"
+            >Event Log</n-text
+          >
+          <n-button quaternary size="tiny" @click="clearLog">Clear</n-button>
+        </div>
         <div class="event-log" ref="logRef">
           <div
             v-for="(entry, i) in eventLog"
@@ -194,17 +178,24 @@
             <span class="log-time">{{ entry.time }}</span>
             <span class="log-msg">{{ entry.message }}</span>
           </div>
-          <div v-if="eventLog.length === 0" class="log-empty">
+          <n-text
+            v-if="eventLog.length === 0"
+            depth="3"
+            italic
+            style="font-size: 0.72rem"
+          >
             No events yet.
-          </div>
+          </n-text>
         </div>
-      </div>
+      </n-card>
     </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted, onUnmounted } from "vue";
+import { ref, computed, nextTick, onMounted, onUnmounted } from "vue";
+import { NCard, NInput, NButton, NText, NDivider, NSelect } from "naive-ui";
+import type { SelectOption } from "naive-ui";
 import wasmInit, { GameMonitor } from "monitor-client";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
@@ -258,17 +249,22 @@ const user = ref<UserInfo | null>(null);
 // Scene state
 const activeScene = ref<SceneEntry | null>(null);
 const selectedUserId = ref<number | null>(null);
-const isSceneDropdownOpen = ref(false);
 const roomUsers = ref<RoomUser[]>([]);
 
+// Computed options for n-select
+const playerOptions = computed<SelectOption[]>(() =>
+  roomUsers.value.map((u) => ({
+    label: `${u.name} (#${u.id})`,
+    value: u.id,
+  })),
+);
+
 let monitor: GameMonitor | null = null;
+let monitorBusy = false;
 let tickRaf = 0;
 let wasmReady = false;
 let sceneCounter = 0;
 const defaultFileMap = ref<Record<string, Uint8Array> | null>(null);
-
-const SCENE_WIDTH = 960;
-const SCENE_HEIGHT = 640;
 
 function log(message: string, level: LogEntry["level"] = "info") {
   const now = new Date();
@@ -342,6 +338,46 @@ function handleGameMonitorMessage(msg: string) {
 
 // ── Scene management ────────────────────────────────────────────────
 
+let pendingResize = false;
+let resizeObserver: ResizeObserver | null = null;
+
+function initResizeObserver() {
+  if (!resizeObserver) {
+    resizeObserver = new ResizeObserver(() => {
+      applyResize();
+    });
+  }
+  return resizeObserver;
+}
+
+function applyResize() {
+  if (!activeScene.value || !monitor) return;
+  const canvas = document.getElementById(
+    activeScene.value.canvasId,
+  ) as HTMLCanvasElement;
+  if (!canvas) return;
+
+  // Let CSS flexbox define the actual available layout bounds
+  const targetW = canvas.clientWidth;
+  const targetH = canvas.clientHeight;
+  if (targetW === 0 || targetH === 0) return;
+
+  if (canvas.width !== targetW || canvas.height !== targetH) {
+    if (!monitorBusy) {
+      try {
+        monitor.resize_scene(activeScene.value.userId, targetW, targetH);
+        canvas.width = targetW;
+        canvas.height = targetH;
+        pendingResize = false;
+      } catch (e) {
+        console.warn("Resize failed:", e);
+      }
+    } else {
+      pendingResize = true;
+    }
+  }
+}
+
 function onCanvasRef(userId: number, el: HTMLCanvasElement | null) {
   if (!el || !monitor) return;
   const scene = activeScene.value;
@@ -349,15 +385,28 @@ function onCanvasRef(userId: number, el: HTMLCanvasElement | null) {
 
   scene.isCreated = true;
 
-  el.width = SCENE_WIDTH;
-  el.height = SCENE_HEIGHT;
+  if (el.parentElement) {
+    initResizeObserver().disconnect();
+    initResizeObserver().observe(el.parentElement);
+  }
 
   nextTick(async () => {
     try {
       if (monitor) {
         monitor.attach_canvas(userId, scene.canvasId);
         if (defaultFileMap.value) {
-          await monitor.load_scene_resource_pack(userId, defaultFileMap.value);
+          monitorBusy = true;
+          try {
+            await monitor.load_scene_resource_pack(
+              userId,
+              defaultFileMap.value,
+            );
+          } finally {
+            monitorBusy = false;
+            if (pendingResize) applyResize();
+          }
+        } else {
+          applyResize();
         }
         log(`Scene attached for player #${userId}`, "event");
       }
@@ -369,7 +418,7 @@ function onCanvasRef(userId: number, el: HTMLCanvasElement | null) {
 }
 
 function selectPlayer(uid: number) {
-  if (selectedUserId.value === uid) return;
+  if (selectedUserId.value === uid && activeScene.value) return;
 
   // Detach previous scene
   detachCurrentScene();
@@ -515,10 +564,15 @@ function leaveRoom() {
 
 function startTicking() {
   function tick(ts: number) {
-    if (monitor) {
-      try {
-        monitor.tick(ts);
-      } catch (_) {}
+    if (monitor && !monitorBusy) {
+      // Poll connection status — more robust than parsing console.log
+      if (!monitor.is_connected()) {
+        handleDisconnect();
+      } else {
+        try {
+          monitor.tick(ts);
+        } catch (_) {}
+      }
     }
     tickRaf = requestAnimationFrame(tick);
   }
@@ -526,6 +580,16 @@ function startTicking() {
 }
 function stopTicking() {
   cancelAnimationFrame(tickRaf);
+}
+
+function handleDisconnect() {
+  clearAllScenes();
+  roomUsers.value = [];
+  monitor = null;
+  stopTicking();
+  wsState.value = "disconnected";
+  wsLabel.value = "Disconnected";
+  log("WebSocket disconnected", "warn");
 }
 
 // Intercept console.log to capture "GameMonitor:" messages
@@ -592,7 +656,6 @@ onUnmounted(() => {
   grid-template-columns: clamp(240px, 20vw, 400px) 1fr;
   gap: 1rem;
   height: 100%;
-  color-scheme: dark;
 }
 
 /* ── Sidebar ──────────────────────────────────────────────────────── */
@@ -601,10 +664,9 @@ onUnmounted(() => {
 }
 .sidebar-card {
   height: 100%;
-  width: 100%;
-  margin-bottom: 0;
-  display: flex;
-  flex-direction: column;
+}
+.sidebar-card :deep(.n-card__content) {
+  flex: 1;
 }
 
 .section {
@@ -612,137 +674,21 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 0.5rem;
 }
-.section h3 {
-  margin: 0;
-  font-size: 0.7rem;
+.section-title {
+  font-size: 0.7rem !important;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #64748b;
   font-weight: 600;
+  margin-bottom: 0.1rem;
 }
 
-.divider {
-  border: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  margin: 0.6rem 0;
+.auth-info {
+  font-size: 0.82rem;
 }
-
-.input-group {
+.user-row {
   display: flex;
-  gap: 0.4rem;
-}
-.input-group input,
-.input-group .custom-select-wrapper {
-  flex: 1;
-  min-width: 0;
-}
-
-input,
-button {
-  font-family: inherit;
-  font-size: 0.85rem;
-}
-
-input {
-  background: #0b1120;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #e2e8f0;
-  padding: 0.5rem 0.6rem;
-  border-radius: 6px;
-  transition: all 0.2s;
-}
-input:focus {
-  outline: none;
-  border-color: rgba(58, 123, 213, 0.5);
-  box-shadow: 0 0 0 2px rgba(58, 123, 213, 0.15);
-}
-
-.custom-select-wrapper {
-  position: relative;
-}
-.custom-select {
-  background: #0b1120;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  color: #e2e8f0;
-  padding: 0.5rem 0.6rem;
-  font-size: 0.85rem;
-  font-family: inherit;
-  cursor: pointer;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2364748b'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 0.6rem center;
-  padding-right: 1.8rem;
-  transition: all 0.2s;
-  user-select: none;
-  display: flex;
-  align-items: center;
-  min-height: 33px;
-}
-.custom-select.is-open,
-.custom-select:focus {
-  outline: none;
-  border-color: rgba(58, 123, 213, 0.5);
-  box-shadow: 0 0 0 2px rgba(58, 123, 213, 0.15);
-}
-.custom-select.is-disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.custom-select-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-}
-
-.custom-select-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  background: #0b1120;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  z-index: 20;
-  max-height: 250px;
-  overflow-y: auto;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-  padding: 4px;
-}
-
-.custom-select-option {
-  padding: 0.4rem 0.6rem;
-  font-size: 0.85rem;
-  color: #e2e8f0;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: background-color 0.15s;
-}
-.custom-select-option.custom-select-placeholder {
-  color: #64748b;
-  cursor: default;
-}
-.custom-select-option:hover:not(.disabled):not(.custom-select-placeholder) {
-  background-color: rgba(255, 255, 255, 0.06);
-}
-.custom-select-option.selected {
-  background-color: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
-}
-.custom-select-option.disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.field-error {
-  color: #f87171;
-  font-size: 0.78rem;
-}
-.field-hint {
-  color: #475569;
-  font-size: 0.78rem;
-  font-style: italic;
+  align-items: baseline;
+  gap: 0.35rem;
 }
 
 /* ── Main area (right side) ───────────────────────────────────────── */
@@ -753,7 +699,7 @@ input:focus {
   overflow: hidden;
 }
 
-/* ── Scene Grid ───────────────────────────────────────────────────── */
+/* ── Scene ────────────────────────────────────────────────────────── */
 .scene-area {
   flex: 1;
   display: flex;
@@ -768,11 +714,6 @@ input:focus {
   justify-content: center;
   border: 1px dashed rgba(255, 255, 255, 0.08);
   border-radius: 10px;
-}
-.scene-empty-text {
-  color: #475569;
-  font-style: italic;
-  font-size: 0.85rem;
 }
 
 .scene-display {
@@ -795,11 +736,6 @@ input:focus {
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   flex-shrink: 0;
 }
-.scene-label {
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: #94a3b8;
-}
 
 .scene-canvas {
   display: block;
@@ -814,33 +750,6 @@ input:focus {
 .log-card {
   flex-shrink: 0;
   height: clamp(120px, 20vh, 300px);
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  margin-bottom: 0;
-}
-.log-card h3 {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin: 0 0 0.4rem;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #64748b;
-  font-weight: 600;
-}
-
-.btn-clear {
-  font-size: 0.65rem;
-  padding: 0.15rem 0.4rem;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 4px;
-  text-transform: none;
-  letter-spacing: 0;
-  border: none;
-  color: #94a3b8;
-  cursor: pointer;
 }
 
 .event-log {
@@ -880,39 +789,8 @@ input:focus {
 .log-entry.event .log-msg {
   color: #4ade80;
 }
-.log-empty {
-  color: #334155;
-  font-style: italic;
-}
 
-/* ── Auth ──────────────────────────────────────────────────────────── */
-.auth-input {
-  width: 100%;
-  display: block;
-}
-.auth-info {
-  font-size: 0.82rem;
-}
-.user-row {
-  display: flex;
-  align-items: baseline;
-  gap: 0.35rem;
-}
-.user-name {
-  font-weight: 600;
-  color: #e2e8f0;
-}
-.user-id-tag {
-  color: #475569;
-  font-size: 0.75rem;
-}
-.user-rks {
-  color: #3a7bd5;
-  font-size: 0.78rem;
-  margin-top: 1px;
-}
-
-/* ── Status ────────────────────────────────────────────────────────── */
+/* ── Status Dot ───────────────────────────────────────────────────── */
 .status-dot {
   display: flex;
   align-items: center;
@@ -948,15 +826,15 @@ input:focus {
   }
 }
 
-/* ── Buttons ───────────────────────────────────────────────────────── */
-.btn-danger {
-  background: rgba(239, 68, 68, 0.25);
-  color: #f87171;
-  font-size: 0.95rem;
-  padding: 0.4rem 0.5rem;
-  line-height: 1;
+/* ── Input group ──────────────────────────────────────────────────── */
+.input-group {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
 }
-.btn-secondary {
-  background: linear-gradient(135deg, #475569, #334155);
+
+.disconnect-btn:enabled {
+  background-color: rgba(248, 113, 113, 0.15) !important;
+  opacity: 1 !important;
 }
 </style>

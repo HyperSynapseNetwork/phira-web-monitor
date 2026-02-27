@@ -2,102 +2,98 @@
   <div class="play-page">
     <!-- Left Sidebar: Controls -->
     <aside class="sidebar">
-      <div class="card sidebar-card">
+      <n-card
+        class="sidebar-card"
+        content-style="display:flex;flex-direction:column;padding:1.25rem;"
+      >
         <!-- Status Section -->
         <section class="section">
-          <h3>Status</h3>
-          <div class="status-line">{{ statusText }}</div>
-          <div class="status-line wasm-status">{{ wasmStatus }}</div>
+          <n-text depth="3" class="section-title">Status</n-text>
+          <n-text depth="2" style="font-size: 0.82rem">{{ statusText }}</n-text>
+          <n-text depth="3" style="font-size: 0.82rem">{{ wasmStatus }}</n-text>
         </section>
 
-        <hr class="divider" />
+        <n-divider />
 
         <!-- Chart Loader Section -->
         <section class="section">
-          <h3>Chart Loader</h3>
+          <n-text depth="3" class="section-title">Chart Loader</n-text>
           <div class="input-group">
-            <input
-              type="text"
-              v-model="chartId"
+            <n-input
+              v-model:value="chartId"
               placeholder="Chart ID (e.g. 1234)"
+              style="flex: 1"
               @keydown.enter="loadChart"
             />
-            <button @click="loadChart" :disabled="isLoading">Load</button>
+            <n-button type="primary" :loading="isLoading" @click="loadChart">
+              Load
+            </n-button>
           </div>
           <div class="parse-result" :class="parseClass">{{ parseResult }}</div>
-          <p class="tip">Tip: Use ID "test" for a local test chart.</p>
+          <n-text depth="3" italic style="font-size: 0.7rem">
+            Tip: Use ID "test" for a local test chart.
+          </n-text>
         </section>
 
-        <hr class="divider" />
+        <n-divider />
 
         <!-- Playback Section -->
         <section class="section">
-          <h3>Playback</h3>
+          <n-text depth="3" class="section-title">Playback</n-text>
           <div class="input-group">
-            <button
-              class="btn-play"
-              :class="{ paused: !isPaused }"
-              @click="togglePlay"
+            <n-button
+              :type="isPaused ? 'success' : 'error'"
               style="flex: 1"
+              @click="togglePlay"
             >
               {{ isPaused ? "Play" : "Pause" }}
-            </button>
-            <button
-              class="btn-autoplay"
-              :class="{ off: !isAutoplay }"
+            </n-button>
+            <n-button
+              :type="isAutoplay ? 'primary' : 'default'"
               @click="toggleAutoplay"
             >
               Autoplay: {{ isAutoplay ? "ON" : "OFF" }}
-            </button>
+            </n-button>
           </div>
         </section>
 
         <!-- Chart Info (shown when loaded) -->
         <template v-if="chartInfo">
-          <hr class="divider" />
+          <n-divider />
           <section class="section">
-            <h3>Chart Info</h3>
-            <div class="chart-details">
-              <div class="detail-row">
-                <span class="label">Song:</span
-                ><span>{{ chartInfo.name }}</span>
-              </div>
-              <div class="detail-row">
-                <span class="label">Composer:</span
-                ><span>{{ chartInfo.composer }}</span>
-              </div>
-              <div class="detail-row">
-                <span class="label">Charter:</span
-                ><span>{{ chartInfo.charter }}</span>
-              </div>
-              <div class="detail-row">
-                <span class="label">Level:</span
-                ><span>{{ chartInfo.level }}</span>
-              </div>
-            </div>
+            <n-text depth="3" class="section-title">Chart Info</n-text>
+            <n-descriptions label-placement="left" :column="1" size="small">
+              <n-descriptions-item label="Song">
+                {{ chartInfo.name }}
+              </n-descriptions-item>
+              <n-descriptions-item label="Composer">
+                {{ chartInfo.composer }}
+              </n-descriptions-item>
+              <n-descriptions-item label="Charter">
+                {{ chartInfo.charter }}
+              </n-descriptions-item>
+              <n-descriptions-item label="Level">
+                {{ chartInfo.level }}
+              </n-descriptions-item>
+            </n-descriptions>
             <div class="stats">
-              <div class="stat">
-                <div class="stat-value">
-                  {{ chartInfo.difficulty.toFixed(1) }}
-                </div>
-                <div class="stat-label">Difficulty</div>
-              </div>
-              <div class="stat">
-                <div class="stat-value">
-                  {{ chartInfo.offset.toFixed(3) }}
-                </div>
-                <div class="stat-label">Offset</div>
-              </div>
-              <div class="stat">
-                <div class="stat-value">
-                  {{ (chartInfo.format || "unknown").toUpperCase() }}
-                </div>
-                <div class="stat-label">Format</div>
-              </div>
+              <n-statistic label="Difficulty" tabular-nums>
+                <template #default>{{
+                  chartInfo.difficulty.toFixed(1)
+                }}</template>
+              </n-statistic>
+              <n-statistic label="Offset" tabular-nums>
+                <template #default>{{ chartInfo.offset.toFixed(3) }}</template>
+              </n-statistic>
+              <n-statistic label="Format" tabular-nums>
+                <template #default>{{
+                  (chartInfo.format || "unknown").toUpperCase()
+                }}</template>
+              </n-statistic>
             </div>
           </section>
         </template>
-      </div>
+      </n-card>
     </aside>
 
     <!-- Right: Canvas -->
@@ -111,6 +107,16 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
+import {
+  NCard,
+  NInput,
+  NButton,
+  NText,
+  NDivider,
+  NDescriptions,
+  NDescriptionsItem,
+  NStatistic,
+} from "naive-ui";
 import init, { ChartPlayer } from "monitor-client";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
@@ -256,7 +262,6 @@ onUnmounted(() => {
   grid-template-columns: clamp(240px, 20vw, 400px) 1fr;
   gap: 1rem;
   height: 100%;
-  color-scheme: dark;
 }
 
 /* ── Sidebar ──────────────────────────────────────────────────────── */
@@ -265,10 +270,9 @@ onUnmounted(() => {
 }
 .sidebar-card {
   height: 100%;
-  width: 100%;
-  margin-bottom: 0;
-  display: flex;
-  flex-direction: column;
+}
+.sidebar-card :deep(.n-card__content) {
+  flex: 1;
 }
 
 .section {
@@ -276,49 +280,12 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 0.5rem;
 }
-.section h3 {
-  margin: 0;
-  font-size: 0.7rem;
+.section-title {
+  font-size: 0.7rem !important;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #64748b;
   font-weight: 600;
-}
-
-.divider {
-  border: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  margin: 0.6rem 0;
-}
-
-.input-group {
-  display: flex;
-  gap: 0.4rem;
-  margin-bottom: 0;
-}
-.input-group input {
-  flex: 1;
-  min-width: 0;
-}
-
-input,
-button {
-  font-family: inherit;
-  font-size: 0.85rem;
-}
-
-input {
-  background: #0b1120;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #e2e8f0;
-  padding: 0.5rem 0.6rem;
-  border-radius: 6px;
-  transition: all 0.2s;
-}
-input:focus {
-  outline: none;
-  border-color: rgba(58, 123, 213, 0.5);
-  box-shadow: 0 0 0 2px rgba(58, 123, 213, 0.15);
+  margin-bottom: 0.1rem;
 }
 
 /* ── Main area ────────────────────────────────────────────────────── */
@@ -344,30 +311,6 @@ input:focus {
   background: #0a0a0a;
 }
 
-/* ── Status ────────────────────────────────────────────────────────── */
-.wasm-status {
-  color: #475569;
-}
-.status-line {
-  font-size: 0.82rem;
-  color: #94a3b8;
-}
-
-/* ── Buttons ──────────────────────────────────────────────────────── */
-.btn-play {
-  background: linear-gradient(135deg, #10b981, #059669);
-}
-.btn-play.paused {
-  background: linear-gradient(135deg, #ef4444, #dc2626);
-}
-.btn-autoplay {
-  background: linear-gradient(135deg, #8b5cf6, #6d28d9);
-  font-size: 0.75rem;
-}
-.btn-autoplay.off {
-  background: linear-gradient(135deg, #64748b, #475569);
-}
-
 /* ── Parse result ─────────────────────────────────────────────────── */
 .parse-result {
   font-family: "Monaco", "Consolas", monospace;
@@ -382,46 +325,51 @@ input:focus {
   background: rgba(0, 0, 0, 0.25);
   border-radius: 6px;
 }
-
-.tip {
-  font-size: 0.7rem;
-  color: #475569;
-  font-style: italic;
+.parse-result.success {
+  color: #4ade80;
+}
+.parse-result.error {
+  color: #f87171;
+}
+.parse-result.loading {
+  color: #facc15;
 }
 
-/* ── Chart Info ────────────────────────────────────────────────────── */
-.chart-details {
-  font-size: 0.82rem;
-}
-.detail-row {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 3px;
-}
-.detail-row .label {
-  color: #64748b;
-}
-
+/* ── Stats ─────────────────────────────────────────────────────────── */
 .stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 0.4rem;
   margin-top: 0.25rem;
 }
-.stat {
+.stats :deep(.n-statistic) {
   text-align: center;
   padding: 0.35rem;
   background: rgba(255, 255, 255, 0.04);
   border-radius: 6px;
 }
-.stat-value {
-  font-size: 0.9rem;
-  font-weight: bold;
-  color: #3a7bd5;
+.stats :deep(.n-statistic-value) {
+  font-size: 0.9rem !important;
 }
-.stat-label {
-  font-size: 0.6rem;
+.stats :deep(.n-statistic .n-statistic-value__content) {
+  color: #3a7bd5;
+  font-weight: bold;
+}
+.stats :deep(.n-statistic-label) {
+  font-size: 0.6rem !important;
   color: #64748b;
   margin-top: 2px;
+}
+
+/* ── Input group ──────────────────────────────────────────────────── */
+.input-group {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+/* ── Naive UI descriptions compact ────────────────────────────────── */
+:deep(.n-descriptions) {
+  font-size: 0.82rem;
 }
 </style>
