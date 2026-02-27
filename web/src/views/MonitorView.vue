@@ -84,119 +84,97 @@
 
         <hr class="divider" />
 
-        <!-- Scenes Section -->
+        <!-- Player Monitor Section -->
         <section class="section">
-          <h3>Scenes</h3>
-          <div class="input-group">
-            <div class="custom-select-wrapper">
+          <h3>Monitor</h3>
+          <div class="custom-select-wrapper">
+            <div
+              class="custom-select"
+              :class="{
+                'is-disabled': !monitor || roomUsers.length === 0,
+                'is-open': isSceneDropdownOpen,
+              }"
+              @click="
+                if (monitor && roomUsers.length > 0)
+                  isSceneDropdownOpen = !isSceneDropdownOpen;
+              "
+            >
               <div
-                class="custom-select"
-                :class="{
-                  'is-disabled': !monitor || roomUsers.length === 0,
-                  'is-open': isSceneDropdownOpen,
-                }"
-                @click="
-                  if (monitor && roomUsers.length > 0)
-                    isSceneDropdownOpen = !isSceneDropdownOpen;
+                class="custom-select-value"
+                style="
+                  white-space: nowrap;
+                  overflow: hidden;
+                  text-overflow: ellipsis;
                 "
               >
-                <div
-                  class="custom-select-value"
-                  style="
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                  "
+                <template v-if="selectedUserId == null"
+                  >Select player…</template
                 >
-                  <template v-if="sceneUserId == null">Select player…</template>
-                  <template v-else>
-                    {{
-                      roomUsers.find((u) => u.id === sceneUserId)?.name ||
-                      "Unknown"
-                    }}
-                    (#{{ sceneUserId }})
-                  </template>
-                </div>
-              </div>
-
-              <div
-                v-if="isSceneDropdownOpen"
-                class="custom-select-backdrop"
-                @click.stop="isSceneDropdownOpen = false"
-              ></div>
-
-              <div v-show="isSceneDropdownOpen" class="custom-select-menu">
-                <div class="custom-select-option custom-select-placeholder">
-                  Select player…
-                </div>
-                <div
-                  v-for="u in roomUsers"
-                  :key="u.id"
-                  class="custom-select-option"
-                  :class="{
-                    disabled: scenes.some((s) => s.userId === u.id),
-                    selected: sceneUserId === u.id,
-                  }"
-                  @click="
-                    if (!scenes.some((s) => s.userId === u.id)) {
-                      sceneUserId = u.id;
-                      isSceneDropdownOpen = false;
-                    }
-                  "
-                >
-                  {{ u.name }} (#{{ u.id }})
-                  <template v-if="scenes.some((s) => s.userId === u.id)">
-                    ✓</template
-                  >
-                </div>
+                <template v-else>
+                  {{
+                    roomUsers.find((u) => u.id === selectedUserId)?.name ||
+                    "Unknown"
+                  }}
+                  (#{{ selectedUserId }})
+                </template>
               </div>
             </div>
-            <button
-              @click="addScene"
-              :disabled="!monitor || sceneUserId == null"
-            >
-              Add
-            </button>
+
+            <div
+              v-if="isSceneDropdownOpen"
+              class="custom-select-backdrop"
+              @click.stop="isSceneDropdownOpen = false"
+            ></div>
+
+            <div v-show="isSceneDropdownOpen" class="custom-select-menu">
+              <div class="custom-select-option custom-select-placeholder">
+                Select player…
+              </div>
+              <div
+                v-for="u in roomUsers"
+                :key="u.id"
+                class="custom-select-option"
+                :class="{ selected: selectedUserId === u.id }"
+                @click="
+                  selectPlayer(u.id);
+                  isSceneDropdownOpen = false;
+                "
+              >
+                {{ u.name }} (#{{ u.id }})
+              </div>
+            </div>
           </div>
-          <div class="scene-tags" v-if="scenes.length > 0">
-            <span v-for="s in scenes" :key="s.userId" class="scene-tag">
-              #{{ s.userId }}
-              <button class="tag-close" @click="removeSceneById(s.userId)">
-                ×
-              </button>
-            </span>
-          </div>
-          <div v-else class="field-hint">No active scenes</div>
         </section>
       </div>
     </aside>
 
-    <!-- Right: Scenes + Log -->
+    <!-- Right: Scene + Log -->
     <main class="main-area">
-      <!-- Scene Grid -->
-      <div class="scene-area" v-if="scenes.length > 0">
-        <div v-for="scene in scenes" :key="scene.userId" class="scene-cell">
+      <!-- Single Scene Display -->
+      <div class="scene-area">
+        <div v-if="activeScene" class="scene-display">
           <div class="scene-header">
-            <span class="scene-label">Player #{{ scene.userId }}</span>
-            <button
-              class="btn-scene-close"
-              @click="removeSceneById(scene.userId)"
-            >
-              ×
-            </button>
+            <span class="scene-label">
+              {{
+                roomUsers.find((u) => u.id === activeScene!.userId)?.name ||
+                "Player"
+              }}
+              (#{{ activeScene!.userId }})
+            </span>
           </div>
           <canvas
-            :id="scene.canvasId"
+            :id="activeScene.canvasId"
             :ref="
-              (el) => onCanvasRef(scene.userId, el as HTMLCanvasElement | null)
+              (el) =>
+                onCanvasRef(activeScene!.userId, el as HTMLCanvasElement | null)
             "
             class="scene-canvas"
           ></canvas>
         </div>
-      </div>
-      <div class="scene-area scene-empty" v-else>
-        <div class="scene-empty-text">
-          No scenes. Join a room and add player scenes to start monitoring.
+        <div v-else class="scene-empty">
+          <div class="scene-empty-text">
+            Select a player from the sidebar to start monitoring.
+          </div>
         </div>
       </div>
 
@@ -278,8 +256,8 @@ const authError = ref("");
 const user = ref<UserInfo | null>(null);
 
 // Scene state
-const scenes = ref<SceneEntry[]>([]);
-const sceneUserId = ref<number | null>(null);
+const activeScene = ref<SceneEntry | null>(null);
+const selectedUserId = ref<number | null>(null);
 const isSceneDropdownOpen = ref(false);
 const roomUsers = ref<RoomUser[]>([]);
 
@@ -289,8 +267,8 @@ let wasmReady = false;
 let sceneCounter = 0;
 const defaultFileMap = ref<Record<string, Uint8Array> | null>(null);
 
-const SCENE_WIDTH = 480;
-const SCENE_HEIGHT = 320;
+const SCENE_WIDTH = 960;
+const SCENE_HEIGHT = 640;
 
 function log(message: string, level: LogEntry["level"] = "info") {
   const now = new Date();
@@ -341,6 +319,11 @@ function handleGameMonitorMessage(msg: string) {
   if (left) {
     const uid = parseInt(left[1]);
     roomUsers.value = roomUsers.value.filter((u) => u.id !== uid);
+    // If we were monitoring the user who left, clear
+    if (selectedUserId.value === uid) {
+      detachCurrentScene();
+      selectedUserId.value = null;
+    }
     return;
   }
 
@@ -361,8 +344,8 @@ function handleGameMonitorMessage(msg: string) {
 
 function onCanvasRef(userId: number, el: HTMLCanvasElement | null) {
   if (!el || !monitor) return;
-  const scene = scenes.value.find((s) => s.userId === userId);
-  if (!scene || scene.isCreated) return;
+  const scene = activeScene.value;
+  if (!scene || scene.userId !== userId || scene.isCreated) return;
 
   scene.isCreated = true;
 
@@ -385,49 +368,39 @@ function onCanvasRef(userId: number, el: HTMLCanvasElement | null) {
   });
 }
 
-function addScene() {
-  if (!monitor || sceneUserId.value == null) return;
-  const uid = sceneUserId.value;
-  if (scenes.value.some((s) => s.userId === uid)) {
-    log(`Scene for #${uid} already exists`, "warn");
-    return;
-  }
+function selectPlayer(uid: number) {
+  if (selectedUserId.value === uid) return;
 
-  // Browsers enforce strict autoplay policies.
-  // We must explicitly resume the explicit audio contexts attached to GameScenes
-  // during a direct user gesture (like this button click)!
-  try {
-    monitor.resume_audio();
-  } catch (e) {
-    console.warn("Audio Context resume suppressed", e);
-  }
+  // Detach previous scene
+  detachCurrentScene();
 
-  const canvasId = `scene-canvas-${uid}-${sceneCounter++}`;
-  scenes.value.push({ userId: uid, canvasId, isCreated: false });
-  log(`Adding scene for player #${uid}`, "info");
-}
-
-function removeSceneById(userId: number) {
-  const idx = scenes.value.findIndex((s) => s.userId === userId);
-  if (idx === -1) return;
-  scenes.value.splice(idx, 1);
+  // Resume audio context on user gesture
   if (monitor) {
     try {
-      monitor.detach_canvas(userId);
-      log(`Scene detached for player #${userId}`, "event");
+      monitor.resume_audio();
+    } catch (e) {
+      console.warn("Audio Context resume suppressed", e);
+    }
+  }
+
+  selectedUserId.value = uid;
+  const canvasId = `scene-canvas-${uid}-${sceneCounter++}`;
+  activeScene.value = { userId: uid, canvasId, isCreated: false };
+  log(`Monitoring player #${uid}`, "info");
+}
+
+function detachCurrentScene() {
+  if (activeScene.value && monitor) {
+    try {
+      monitor.detach_canvas(activeScene.value.userId);
     } catch (_) {}
   }
+  activeScene.value = null;
 }
 
 function clearAllScenes() {
-  for (const scene of scenes.value) {
-    if (monitor) {
-      try {
-        monitor.detach_canvas(scene.userId);
-      } catch (_) {}
-    }
-  }
-  scenes.value = [];
+  detachCurrentScene();
+  selectedUserId.value = null;
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────
@@ -616,7 +589,7 @@ onUnmounted(() => {
   overflow: hidden;
   padding: 1rem;
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: clamp(240px, 20vw, 400px) 1fr;
   gap: 1rem;
   height: 100%;
   color-scheme: dark;
@@ -772,32 +745,6 @@ input:focus {
   font-style: italic;
 }
 
-.scene-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-}
-.scene-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  background: rgba(58, 123, 213, 0.15);
-  color: #7dd3fc;
-  border-radius: 4px;
-  padding: 0.15rem 0.4rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-}
-.tag-close {
-  background: transparent;
-  border: none;
-  color: #f87171;
-  font-size: 0.85rem;
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-}
-
 /* ── Main area (right side) ───────────────────────────────────────── */
 .main-area {
   display: flex;
@@ -810,14 +757,12 @@ input:focus {
 .scene-area {
   flex: 1;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-content: flex-start;
-  overflow-y: auto;
   min-height: 0;
+  overflow: hidden;
 }
 
 .scene-empty {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -830,13 +775,15 @@ input:focus {
   font-size: 0.85rem;
 }
 
-.scene-cell {
+.scene-display {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
+  min-height: 0;
 }
 
 .scene-header {
@@ -846,33 +793,27 @@ input:focus {
   padding: 0.25rem 0.5rem;
   background: rgba(255, 255, 255, 0.04);
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  flex-shrink: 0;
 }
 .scene-label {
   font-size: 0.72rem;
   font-weight: 600;
   color: #94a3b8;
 }
-.btn-scene-close {
-  background: transparent;
-  border: none;
-  color: #f87171;
-  font-size: 0.9rem;
-  cursor: pointer;
-  padding: 0 0.2rem;
-  line-height: 1;
-}
 
 .scene-canvas {
   display: block;
-  width: 480px;
-  height: 320px;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
   background: #0a0a0a;
+  object-fit: contain;
 }
 
 /* ── Log Card ─────────────────────────────────────────────────────── */
 .log-card {
   flex-shrink: 0;
-  height: 320px;
+  height: clamp(120px, 20vh, 300px);
   display: flex;
   flex-direction: column;
   width: 100%;

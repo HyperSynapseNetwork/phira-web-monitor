@@ -3,17 +3,35 @@
     <nav class="top-nav">
       <h1 class="brand">Phira Web Monitor</h1>
       <div class="nav-links">
-        <router-link to="/play" class="nav-link" active-class="active"
-          >Play</router-link
+        <button
+          class="nav-link"
+          :class="{ active: activeTab === 'play' }"
+          @click="activeTab = 'play'"
         >
-        <router-link to="/monitor" class="nav-link" active-class="active"
-          >Monitor</router-link
+          Play
+        </button>
+        <button
+          class="nav-link"
+          :class="{ active: activeTab === 'monitor' }"
+          @click="activeTab = 'monitor'"
         >
+          Monitor
+        </button>
       </div>
     </nav>
-    <router-view />
+    <!-- v-show keeps both components alive so WebGL/WS state is preserved -->
+    <PlayerView v-show="activeTab === 'play'" />
+    <MonitorView v-show="activeTab === 'monitor'" />
   </div>
 </template>
+
+<script setup lang="ts">
+import { ref } from "vue";
+import PlayerView from "./views/PlayerView.vue";
+import MonitorView from "./views/MonitorView.vue";
+
+const activeTab = ref<"play" | "monitor">("monitor");
+</script>
 
 <style>
 /* ── Reset & Global ────────────────────────────────────────────────── */
@@ -85,6 +103,9 @@ body {
   font-weight: 500;
   color: #8b949e;
   transition: all 0.15s;
+  border: none;
+  background: transparent;
+  cursor: pointer;
 }
 .nav-link:hover {
   color: #c9d1d9;
