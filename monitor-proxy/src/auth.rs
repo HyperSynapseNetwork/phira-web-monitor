@@ -23,7 +23,7 @@ pub async fn auth_middleware(
     let cookie = jar.get("hsn_auth").ok_or_else(|| {
         (
             StatusCode::UNAUTHORIZED,
-            json_err!("cookie hsn_auth not found"),
+            json_err!("cookie hsn_auth not found or invalid"),
         )
     })?;
     let session: AuthSession = serde_json::from_str(cookie.value())
