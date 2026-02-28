@@ -19,15 +19,20 @@ pub async fn auth_middleware(
     jar: PrivateCookieJar,
     mut req: Request,
     next: Next,
-) -> Result<Response, StatusCode> {
-    let cookie = jar.get("hsn_auth").ok_or(StatusCode::UNAUTHORIZED)?;
-    let session: AuthSession =
-        serde_json::from_str(cookie.value()).map_err(|_| StatusCode::UNAUTHORIZED)?;
+) -> Result<Response, (StatusCode, Response)> {
+    let cookie = jar.get("hsn_auth").ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            json_err!("cookie hsn_auth not found"),
+        )
+    })?;
+    let session: AuthSession = serde_json::from_str(cookie.value())
+        .map_err(|_| (StatusCode::UNAUTHORIZED, json_err!("invalid cookie value")))?;
 
     if session.expire_at < Utc::now() + Duration::seconds(60) {
         // should refresh, but we don't know Phira's refresh api
         // suspect that they didn't implement this /oh
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err((StatusCode::UNAUTHORIZED, json_err!("cookie expired")));
     }
     req.extensions_mut().insert(session);
     Ok((jar, next.run(req).await).into_response())
