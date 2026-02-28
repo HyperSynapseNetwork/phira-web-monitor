@@ -84,7 +84,7 @@ pub async fn login(
             json_err!("failed to parse response"),
         );
     };
-    let cookie = session::build_session_cookie(&resp, user_id);
+    let cookie = session::build_session_cookie(&resp, user_id, state.args.debug);
     (
         StatusCode::OK,
         (jar.add(cookie), json_msg!("login success")).into_response(),

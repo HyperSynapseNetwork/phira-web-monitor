@@ -1,4 +1,4 @@
-use axum_extra::extract::cookie::{self, Cookie};
+use axum_extra::extract::cookie::{self, Cookie, SameSite};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -20,7 +20,11 @@ pub struct AuthSession {
     pub expire_at: DateTime<Utc>,
 }
 
-pub fn build_session_cookie(data: &PhiraLoginResponse, user_id: i32) -> Cookie<'static> {
+pub fn build_session_cookie(
+    data: &PhiraLoginResponse,
+    user_id: i32,
+    debug: bool,
+) -> Cookie<'static> {
     let session = AuthSession {
         id: user_id,
         token: data.token.clone(),
@@ -35,8 +39,8 @@ pub fn build_session_cookie(data: &PhiraLoginResponse, user_id: i32) -> Cookie<'
     Cookie::build(("hsn_auth", value))
         .path("/")
         .http_only(true)
-        .secure(true)
-        .same_site(cookie::SameSite::Lax)
+        .secure(!debug)
+        .same_site(if debug { SameSite::None } else { SameSite::Lax })
         .expires(expiration)
         .build()
 }
