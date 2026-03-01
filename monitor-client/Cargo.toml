@@ -53,5 +53,11 @@ web-sys = { version = "0.3", features = [
     "BlobPropertyBag",
     "Url",
     "ImageBitmap",
+    "WebSocket",
+    "BinaryType",
+    "MessageEvent",
+    "CloseEvent",
+    "ErrorEvent",
 ]}
 serde-wasm-bindgen = "0.6.5"
+phira-mp-common = { path = "../../phira-mp/phira-mp-common", default-features = false }

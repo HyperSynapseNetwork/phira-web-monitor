@@ -2,7 +2,7 @@ mod chart;
 pub use chart::ChartRenderer;
 
 mod judge;
-pub use judge::JudgeEventKind;
+pub use judge::{JudgeEvent, JudgeEventKind};
 
 mod line;
 pub use line::draw_line;

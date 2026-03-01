@@ -1,18 +1,13 @@
 import { defineConfig } from "vite";
+import vue from "@vitejs/plugin-vue";
 
 export default defineConfig({
+  plugins: [vue()],
   server: {
     port: 3000,
     fs: {
       // Allow serving files from the monitor/pkg directory
       allow: [".."],
-    },
-    proxy: {
-      // Proxy API requests to our proxy server
-      "/chart": {
-        target: "http://localhost:3080",
-        changeOrigin: true,
-      },
     },
   },
   build: {

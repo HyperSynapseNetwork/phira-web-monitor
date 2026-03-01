@@ -1,4 +1,5 @@
-use anyhow::{anyhow, Context, Error, Result};
+use crate::utils::{SResult, TaskResult};
+use anyhow::{Context, Error, Result};
 use axum::response::sse::Event;
 use futures::StreamExt;
 use phira_mp_common::{
@@ -9,7 +10,6 @@ use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     convert::Infallible,
-    future::Future,
     sync::{
         atomic::{AtomicU8, Ordering},
         Arc,
@@ -18,48 +18,11 @@ use std::{
 };
 use tokio::{
     net::TcpStream,
-    sync::{broadcast, oneshot, Mutex, Notify, RwLock},
+    sync::{broadcast, Mutex, Notify, RwLock},
     task::JoinHandle,
     time,
 };
 use tokio_stream::wrappers::BroadcastStream;
-
-type SResult<T> = Result<T, String>;
-
-const TIMEOUT: Duration = Duration::from_secs(3);
-
-struct TaskResult<T> {
-    lock: Mutex<()>,
-    tx: Mutex<Option<oneshot::Sender<T>>>,
-}
-
-impl<T> TaskResult<T> {
-    pub fn new() -> Self {
-        TaskResult {
-            lock: Mutex::default(),
-            tx: Mutex::default(),
-        }
-    }
-    pub async fn acquire<F>(&self, f: impl FnOnce() -> F) -> Result<T>
-    where
-        F: Future<Output = Result<()>>,
-    {
-        let _guard = self.lock.lock().await;
-        let (tx, rx) = oneshot::channel();
-        *self.tx.lock().await = Some(tx);
-        f().await?;
-        Ok(time::timeout(TIMEOUT, rx).await??)
-    }
-    pub async fn put(&self, value: T) -> Result<()> {
-        self.tx
-            .lock()
-            .await
-            .take()
-            .ok_or_else(|| anyhow!("no active task"))?
-            .send(value)
-            .map_err(|_| anyhow!("failed to send value"))
-    }
-}
 
 struct ClientState {
     delay: Mutex<Option<Duration>>,
