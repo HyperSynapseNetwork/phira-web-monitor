@@ -9,7 +9,7 @@
 本项目由 4 个协同工作的主要工作区（workspace）组成：
 
 1. **`monitor-common`**：定义了跨网络层和 WebGL 渲染器使用的共享 Rust 数据结构、二进制解析工具和核心逻辑。
-2. **`monitor-proxy`**：基于 Rust Actix 的服务器，作为官方 Phira 服务器和浏览器客户端之间的桥梁。它负责用户认证、轮询房间列表、流式传输远程判定事件（SSE），以及提供谱面二进制文件。
+2. **`monitor-proxy`**：基于 Rust Axum 的服务器，作为官方 Phira 服务器和浏览器客户端之间的桥梁。它负责用户认证（JWT）、轮询房间列表、流式传输远程判定事件（SSE），以及提供谱面二进制文件。
 3. **`monitor-client`**：本项目的 WebAssembly (WASM) 核心。使用 Rust 编写，解码 `bincode` 谱面数据，并利用 WebGL 原生计算并渲染 Phira 谱面。
 4. **`web`**：一个现代的 Vue 3 + TypeScript 前端应用。它管理 UI 状态，建立 WebSocket 和 SSE 事件监听器，协调音频上下文（AudioContext），并为 WASM WebGL 引擎动态管理画布（Canvas）尺寸。
 
@@ -97,7 +97,7 @@
 
 #### `POST /auth/login`
 
-**说明**：代理到官方 Phira 认证接口的登录端点。注意：成功后将设置 `hsn_auth` 这个安全 Cookie。
+**说明**：代理到官方 Phira 认证接口的登录端点。成功后返回一个 JWT Token，前端需要保存该 Token 用于后续的认证请求。
 
 **请求格式**：`application/json`。
 
@@ -108,9 +108,17 @@
 }
 ```
 
+**响应格式**：`application/json`。
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
 #### `GET /auth/me`
 
-**说明**：获取当前认证 Cookie 对应的用户资料数据（在 Phira 原生数据的缓存）。
+**说明**：获取当前 JWT Token 对应的用户资料数据（在 Phira 原生数据的缓存）。需要在请求头中携带 `Authorization: Bearer <token>`。
 
 **响应格式**：`application/json`。
 
@@ -222,7 +230,7 @@ cargo build --release --bin monitor-proxy
 
 #### 环境变量
 
-Rust 服务器还需要通过一个 Secret Key 来确保生成用户登录 Cookie 时的加密安全。在启动进程前**必须**定义它。
+Rust 服务器还需要通过一个 Secret Key 来确保生成用户 token 时的加密安全，以及用于和 phira-mp 服务器沟通时的鉴权。在启动进程前**必须**定义它，**并且要和 phira-mp 设置的相同**。
 
 ```bash
 export HSN_SECRET_KEY=$(openssl rand -hex 32)
