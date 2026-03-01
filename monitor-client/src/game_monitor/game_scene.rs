@@ -618,10 +618,10 @@ impl GameScene {
             }
             touch.anim.set_time(t);
             let pos = touch.anim.now();
-            let screen_y = -pos.y / aspect;
+
             renderer.draw_circle(
-                pos.x,
-                screen_y,
+                pos.x * aspect,
+                -pos.y,
                 TOUCH_RADIUS * 2.5,
                 TOUCH_COLOR[0],
                 TOUCH_COLOR[1],
