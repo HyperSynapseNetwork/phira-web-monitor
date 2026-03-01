@@ -1,42 +1,17 @@
-use crate::{auth::session::PhiraLoginResponse, json_err, json_msg, AppState};
+use crate::{auth::session::PhiraLoginResponse, json_err, AppState};
 use axum::{
-    extract::{Request, State},
+    extract::State,
     http::StatusCode,
-    middleware::Next,
     response::{IntoResponse, Response},
-    Extension, Json,
+    Json,
 };
-use axum_extra::extract::PrivateCookieJar;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
+use jsonwebtoken::{encode, Header};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 mod session;
 pub use session::AuthSession;
-
-pub async fn auth_middleware(
-    State(_state): State<AppState>,
-    jar: PrivateCookieJar,
-    mut req: Request,
-    next: Next,
-) -> Result<Response, (StatusCode, Response)> {
-    let cookie = jar.get("hsn_auth").ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            json_err!("cookie hsn_auth not found or invalid"),
-        )
-    })?;
-    let session: AuthSession = serde_json::from_str(cookie.value())
-        .map_err(|_| (StatusCode::UNAUTHORIZED, json_err!("invalid cookie value")))?;
-
-    if session.expire_at < Utc::now() + Duration::seconds(60) {
-        // should refresh, but we don't know Phira's refresh api
-        // suspect that they didn't implement this /oh
-        return Err((StatusCode::UNAUTHORIZED, json_err!("cookie expired")));
-    }
-    req.extensions_mut().insert(session);
-    Ok((jar, next.run(req).await).into_response())
-}
 
 #[derive(Serialize, Deserialize)]
 pub struct LoginRequest {
@@ -46,7 +21,6 @@ pub struct LoginRequest {
 
 pub async fn login(
     State(state): State<AppState>,
-    jar: PrivateCookieJar,
     Json(payload): Json<LoginRequest>,
 ) -> (StatusCode, Response) {
     let resp = match state
@@ -84,11 +58,26 @@ pub async fn login(
             json_err!("failed to parse response"),
         );
     };
-    let cookie = session::build_session_cookie(&resp, user_id, state.args.debug);
-    (
-        StatusCode::OK,
-        (jar.add(cookie), json_msg!("login success")).into_response(),
-    )
+    let session = AuthSession {
+        id: user_id,
+        token: resp.token.clone(),
+        refresh_token: resp.refresh_token.clone(),
+        exp: resp.expire_at.timestamp() as usize,
+    };
+    match encode(&Header::default(), &session, &state.encoding_key) {
+        Ok(token) => {
+            return (
+                StatusCode::OK,
+                Json(json!({"token": token})).into_response(),
+            );
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json_err!("failed to encode token: {e}"),
+            );
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -112,7 +101,7 @@ pub struct PhiraProfileResponse {
 
 pub async fn get_me_profile(
     State(state): State<AppState>,
-    Extension(session): Extension<session::AuthSession>,
+    session: AuthSession,
 ) -> (StatusCode, Response) {
     let token = session.token;
     let resp = match state

@@ -245,6 +245,7 @@ const password = ref("");
 const loggingIn = ref(false);
 const authError = ref("");
 const user = ref<UserInfo | null>(null);
+const authToken = ref<string | null>(localStorage.getItem("auth_token"));
 
 // Scene state
 const activeScene = ref<SceneEntry | null>(null);
@@ -454,11 +455,18 @@ function clearAllScenes() {
 
 // ── Auth ──────────────────────────────────────────────────────────────
 async function checkAuth() {
+  if (!authToken.value) return;
   try {
-    const resp = await fetch(`${API_BASE}/auth/me`, { credentials: "include" });
+    const resp = await fetch(`${API_BASE}/auth/me`, {
+      headers: { Authorization: `Bearer ${authToken.value}` },
+    });
     if (resp.ok) {
       user.value = await resp.json();
       log(`Authenticated as ${user.value!.username}`, "event");
+    } else {
+      // Token expired or invalid — clear it
+      authToken.value = null;
+      localStorage.removeItem("auth_token");
     }
   } catch (_) {
     /* not logged in */
@@ -472,14 +480,16 @@ async function login() {
     const resp = await fetch(`${API_BASE}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "include",
       body: JSON.stringify({ email: email.value, password: password.value }),
     });
     if (!resp.ok) {
-      const data = await resp.json().catch(() => ({}));
-      authError.value = data.error || "Login failed";
+      const errData = await resp.json().catch(() => ({}));
+      authError.value = errData.error || "Login failed";
       return;
     }
+    const data = await resp.json();
+    authToken.value = data.token;
+    localStorage.setItem("auth_token", data.token);
     await checkAuth();
     password.value = "";
   } catch (e) {
@@ -507,7 +517,7 @@ async function connect() {
   clearAllScenes();
   roomUsers.value = [];
 
-  const wsUrl = `${wsBaseFromApi(API_BASE)}/ws/live`;
+  const wsUrl = `${wsBaseFromApi(API_BASE)}/ws/live?token=${encodeURIComponent(authToken.value!)}`;
   wsState.value = "connecting";
   wsLabel.value = "Connecting...";
   log(`Connecting to ${wsUrl}...`);

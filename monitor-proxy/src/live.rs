@@ -5,7 +5,6 @@ use axum::{
         State, WebSocketUpgrade,
     },
     response::IntoResponse,
-    Extension,
 };
 use futures::{stream::StreamExt, SinkExt};
 use log::{error, info};
@@ -18,7 +17,7 @@ pub use client::*;
 
 pub async fn live_ws(
     State(state): State<AppState>,
-    Extension(session): Extension<AuthSession>,
+    session: AuthSession,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     info!("Live WS upgrade request from user {}", session.id);

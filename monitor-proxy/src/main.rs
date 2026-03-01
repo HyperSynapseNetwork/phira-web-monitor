@@ -7,13 +7,12 @@
 
 use axum::{
     http::{header, HeaderValue, Method},
-    middleware,
     routing::get,
     routing::post,
     Router,
 };
-use axum_extra::extract::cookie;
 use clap::Parser;
+use jsonwebtoken::{DecodingKey, EncodingKey};
 use phira_mp_common::generate_secret_key;
 use reqwest::Client;
 use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
@@ -74,17 +73,16 @@ pub struct AppStateInner {
     /// Room monitor client
     pub room_monitor_client: rooms::RoomMonitorClient,
 
-    /// Secret key for cookie signing
-    pub cookie_key: cookie::Key,
+    /// Secret key for JWT encoding/decoding
+    pub encoding_key: EncodingKey,
+    pub decoding_key: DecodingKey,
 }
 
 pub struct AppState(Arc<AppStateInner>);
 
 impl AppState {
     pub async fn new(args: Args) -> Self {
-        let cookie_key = cookie::Key::from(
-            &generate_secret_key("cookie", 64).expect("failed to generate key for cookie"),
-        );
+        let jwt_key = generate_secret_key("jwt", 64).expect("failed to generate key for cookie");
         let http_client = Client::new();
         let room_monitor_client = rooms::RoomMonitorClient::new(&args.mp_server)
             .await
@@ -94,7 +92,8 @@ impl AppState {
             args,
             http_client,
             room_monitor_client,
-            cookie_key,
+            encoding_key: EncodingKey::from_secret(&jwt_key),
+            decoding_key: DecodingKey::from_secret(&jwt_key),
         }))
     }
 }
@@ -109,12 +108,6 @@ impl std::ops::Deref for AppState {
 impl Clone for AppState {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))
-    }
-}
-
-impl axum::extract::FromRef<AppState> for cookie::Key {
-    fn from_ref(state: &AppState) -> Self {
-        state.cookie_key.clone()
     }
 }
 
@@ -164,7 +157,7 @@ async fn main() -> anyhow::Result<()> {
         CorsLayer::new()
             .allow_origin(tower_http::cors::AllowOrigin::mirror_request())
             .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-            .allow_headers([header::CONTENT_TYPE])
+            .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
             .allow_credentials(true)
     } else {
         let origin: HeaderValue = state
@@ -177,28 +170,19 @@ async fn main() -> anyhow::Result<()> {
         CorsLayer::new()
             .allow_origin(origin)
             .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-            .allow_headers([header::CONTENT_TYPE])
+            .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
             .allow_credentials(true)
     };
 
-    let public_routes = Router::new()
+    let app = Router::new()
         .route("/chart/{id}", get(chart::fetch_and_parse_chart))
         .route("/rooms/info", get(rooms::get_room_list))
         .route("/rooms/info/{id}", get(rooms::get_room_by_id))
         .route("/rooms/user/{id}", get(rooms::get_room_of_user))
         .route("/rooms/listen", get(rooms::listen))
-        .route("/auth/login", post(auth::login));
-    let protected_routes = Router::new()
+        .route("/auth/login", post(auth::login))
         .route("/auth/me", get(auth::get_me_profile))
         .route("/ws/live", get(live::live_ws))
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth::auth_middleware,
-        ));
-
-    let app = Router::new()
-        .merge(public_routes)
-        .merge(protected_routes)
         .fallback_service(ServeDir::new("../web/dist"))
         .with_state(state)
         .layer(cors);

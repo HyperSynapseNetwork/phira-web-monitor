@@ -1,7 +1,13 @@
-use axum_extra::extract::cookie::{self, Cookie, SameSite};
+use axum::{
+    extract::{FromRequestParts, Query},
+    http::{header::AUTHORIZATION, request::Parts, StatusCode},
+    response::Response,
+};
 use chrono::{DateTime, Utc};
+use jsonwebtoken::{decode, Validation};
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
+
+use crate::{json_err, AppState};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,30 +23,54 @@ pub struct AuthSession {
     pub id: i32,
     pub token: String,
     pub refresh_token: String,
-    pub expire_at: DateTime<Utc>,
+    pub exp: usize,
 }
 
-pub fn build_session_cookie(
-    data: &PhiraLoginResponse,
-    user_id: i32,
-    debug: bool,
-) -> Cookie<'static> {
-    let session = AuthSession {
-        id: user_id,
-        token: data.token.clone(),
-        refresh_token: data.refresh_token.clone(),
-        expire_at: data.expire_at.clone(),
-    };
-    let value = serde_json::to_string(&session).unwrap();
-    let expiration = {
-        let nanos = data.expire_at.timestamp_nanos_opt().unwrap_or(0) as i128;
-        OffsetDateTime::from_unix_timestamp_nanos(nanos).expect("timestamp out of range")
-    };
-    Cookie::build(("hsn_auth", value))
-        .path("/")
-        .http_only(true)
-        .secure(!debug)
-        .same_site(if debug { SameSite::None } else { SameSite::Lax })
-        .expires(expiration)
-        .build()
+#[derive(Deserialize)]
+struct TokenQuery {
+    token: Option<String>,
+}
+
+impl FromRequestParts<AppState> for AuthSession {
+    type Rejection = (StatusCode, Response);
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        // Try Authorization header first, then fall back to ?token= query parameter
+        // (needed for WebSocket upgrade requests where browsers can't set custom headers)
+        let token_string;
+        let token = if let Some(auth_header) = parts
+            .headers
+            .get(AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+        {
+            if auth_header.starts_with("Bearer ") {
+                &auth_header[7..]
+            } else {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    json_err!("Invalid Authorization header"),
+                ));
+            }
+        } else {
+            // Fallback: extract token from query parameter
+            token_string = Query::<TokenQuery>::from_request_parts(parts, state)
+                .await
+                .ok()
+                .and_then(|q| q.0.token)
+                .ok_or_else(|| {
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        json_err!("Missing Authorization header or token query parameter"),
+                    )
+                })?;
+            &token_string
+        };
+        // use default validation because we don't know Phira's refresh method
+        Ok(decode(token, &state.decoding_key, &Validation::default())
+            .map_err(|_| (StatusCode::UNAUTHORIZED, json_err!("Invalid bearer token")))?
+            .claims)
+    }
 }
