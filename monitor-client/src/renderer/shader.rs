@@ -54,6 +54,30 @@ impl ShaderManager {
 
         self.programs.insert("default".to_string(), program);
 
+        // Add circle shader for touch points
+        let circle_frag_src = r#"#version 300 es
+        precision mediump float;
+        
+        in vec2 v_tex_coord;
+        in vec4 v_color;
+        
+        uniform sampler2D u_texture;
+        
+        out vec4 out_color;
+        
+        void main() {
+            vec2 c = v_tex_coord - vec2(0.5);
+            float dist = length(c);
+            if (dist > 0.5) discard;
+            float alpha = smoothstep(0.5, 0.45, dist);
+            out_color = vec4(v_color.rgb, v_color.a * alpha) * texture(u_texture, v_tex_coord);
+        }
+        "#;
+        let frag_circle =
+            ctx.create_shader(WebGl2RenderingContext::FRAGMENT_SHADER, circle_frag_src)?;
+        let program_circle = ctx.create_program(&vert, &frag_circle)?;
+        self.programs.insert("circle".to_string(), program_circle);
+
         Ok(())
     }
 

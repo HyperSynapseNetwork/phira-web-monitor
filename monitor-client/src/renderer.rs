@@ -70,6 +70,10 @@ impl Renderer {
         self.context.resize(width, height);
     }
 
+    pub fn set_viewport(&mut self, x: i32, y: i32, width: u32, height: u32) {
+        self.context.set_viewport(x, y, width, height);
+    }
+
     pub fn begin_frame(&mut self) {
         self.shader_manager.use_program(&self.context, "default");
         // Ensure u_texture is set to unit 0
@@ -107,6 +111,55 @@ impl Renderer {
         self.batcher.set_texture(&self.context, &self.white_texture);
         self.batcher
             .draw_rect(&self.context, x, y, w, h, r, g, b, a, model);
+    }
+
+    pub fn draw_circle(
+        &mut self,
+        x: f32,
+        y: f32,
+        radius: f32,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+        model: &[f32; 16],
+    ) {
+        self.flush();
+
+        self.shader_manager.use_program(&self.context, "circle");
+
+        // Must manually copy projection since `set_projection` only targets "default"
+        self.shader_manager
+            .set_uniform_matrix4fv(&self.context, "u_projection", &self.projection);
+
+        // Ensure u_texture points to unit 0
+        if let Some(loc) =
+            self.shader_manager
+                .get_uniform_location(&self.context, "circle", "u_texture")
+        {
+            self.context.gl.uniform1i(Some(&loc), 0);
+        }
+
+        self.batcher.set_texture(&self.context, &self.white_texture);
+        self.batcher.draw_texture_rect(
+            &self.context,
+            x - radius,
+            y - radius,
+            radius * 2.0,
+            radius * 2.0,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            r,
+            g,
+            b,
+            a,
+            model,
+        );
+        self.flush();
+
+        self.shader_manager.use_program(&self.context, "default");
     }
 
     pub fn draw_texture_rect(

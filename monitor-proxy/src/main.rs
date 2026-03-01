@@ -5,20 +5,24 @@
 //! 2. Server-side chart parsing (download -> unzip -> parse -> bincode)
 //! 3. Disk-based chart caching with in-flight request deduplication
 
-use axum::{http::Method, middleware, routing::get, routing::post, Router};
-use axum_extra::extract::cookie;
+use axum::{
+    http::{header, HeaderValue, Method},
+    routing::get,
+    routing::post,
+    Router,
+};
 use clap::Parser;
+use jsonwebtoken::{DecodingKey, EncodingKey};
 use phira_mp_common::generate_secret_key;
 use reqwest::Client;
 use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
-use tower_http::{
-    cors::{Any, CorsLayer},
-    services::ServeDir,
-};
+use tower_http::{cors::CorsLayer, services::ServeDir};
 
 mod auth;
 mod chart;
+mod live;
 mod rooms;
+mod utils;
 
 // ── CLI Arguments ──────────────────────────────────────────────────────────────
 
@@ -51,6 +55,10 @@ pub struct Args {
     /// Phira-mp server address
     #[arg(long, default_value = "localhost:12346")]
     pub mp_server: String,
+
+    /// Allowed CORS origin (used when --debug is not set)
+    #[arg(long)]
+    pub allowed_origin: Option<String>,
 }
 
 // ── Application State ──────────────────────────────────────────────────────────
@@ -65,17 +73,16 @@ pub struct AppStateInner {
     /// Room monitor client
     pub room_monitor_client: rooms::RoomMonitorClient,
 
-    /// Secret key for cookie signing
-    pub cookie_key: cookie::Key,
+    /// Secret key for JWT encoding/decoding
+    pub encoding_key: EncodingKey,
+    pub decoding_key: DecodingKey,
 }
 
 pub struct AppState(Arc<AppStateInner>);
 
 impl AppState {
     pub async fn new(args: Args) -> Self {
-        let cookie_key = cookie::Key::from(
-            &generate_secret_key("cookie", 64).expect("failed to generate key for cookie"),
-        );
+        let jwt_key = generate_secret_key("jwt", 64).expect("failed to generate key for cookie");
         let http_client = Client::new();
         let room_monitor_client = rooms::RoomMonitorClient::new(&args.mp_server)
             .await
@@ -85,7 +92,8 @@ impl AppState {
             args,
             http_client,
             room_monitor_client,
-            cookie_key,
+            encoding_key: EncodingKey::from_secret(&jwt_key),
+            decoding_key: DecodingKey::from_secret(&jwt_key),
         }))
     }
 }
@@ -100,12 +108,6 @@ impl std::ops::Deref for AppState {
 impl Clone for AppState {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))
-    }
-}
-
-impl axum::extract::FromRef<AppState> for cookie::Key {
-    fn from_ref(state: &AppState) -> Self {
-        state.cookie_key.clone()
     }
 }
 
@@ -149,28 +151,38 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState::new(args).await;
 
     // CORS configuration
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers(Any);
+    let cors = if state.args.debug {
+        // Debug: mirror the request Origin header back
+        // (Any + allow_credentials is forbidden by browsers and panics in tower-http)
+        CorsLayer::new()
+            .allow_origin(tower_http::cors::AllowOrigin::mirror_request())
+            .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+            .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+            .allow_credentials(true)
+    } else {
+        let origin: HeaderValue = state
+            .args
+            .allowed_origin
+            .as_ref()
+            .expect("--allowed-origin must be set")
+            .parse()
+            .expect("invalid --allowed-origin value");
+        CorsLayer::new()
+            .allow_origin(origin)
+            .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+            .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+            .allow_credentials(true)
+    };
 
-    let public_routes = Router::new()
+    let app = Router::new()
         .route("/chart/{id}", get(chart::fetch_and_parse_chart))
         .route("/rooms/info", get(rooms::get_room_list))
         .route("/rooms/info/{id}", get(rooms::get_room_by_id))
         .route("/rooms/user/{id}", get(rooms::get_room_of_user))
         .route("/rooms/listen", get(rooms::listen))
-        .route("/auth/login", post(auth::login));
-    let protected_routes = Router::new()
+        .route("/auth/login", post(auth::login))
         .route("/auth/me", get(auth::get_me_profile))
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth::auth_middleware,
-        ));
-
-    let app = Router::new()
-        .merge(public_routes)
-        .merge(protected_routes)
+        .route("/ws/live", get(live::live_ws))
         .fallback_service(ServeDir::new("../web/dist"))
         .with_state(state)
         .layer(cors);

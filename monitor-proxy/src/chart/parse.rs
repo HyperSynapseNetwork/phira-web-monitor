@@ -73,6 +73,12 @@ pub(in crate::chart) fn process_lines(v: &mut [JudgeLine]) {
             }
         }
     }
+
+    // Sort notes structurally so the client receives them sequentially identical to
+    // prpr's JudgeLineCache note_ids automatically.
+    for line in v.iter_mut() {
+        line.sort_notes();
+    }
 }
 
 #[rustfmt::skip]

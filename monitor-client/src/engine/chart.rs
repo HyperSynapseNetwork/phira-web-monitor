@@ -1,3 +1,4 @@
+use crate::console_log;
 use crate::engine::judge::{JudgeEvent, JudgeEventKind};
 use crate::engine::{Resource, draw_line};
 use crate::renderer::Renderer;
@@ -72,94 +73,101 @@ impl ChartRenderer {
         }
     }
 
-    /// Judge update pass. Returns events for hitsound/particle consumption.
-    /// Must be called after `update()` and before `render()`.
-    pub fn update_judges(&mut self, res: &Resource) -> Vec<JudgeEvent> {
+    pub fn update_judges<F>(&mut self, res: &Resource, mut hook: F) -> Vec<JudgeEvent>
+    where
+        F: FnMut(&mut Chart, f32) -> Vec<JudgeEvent>,
+    {
         let t = res.time;
         let dt = res.dt;
         let mut events = Vec::new();
 
-        // No judge updates when paused or seeking backward
         if dt <= 0.0 {
             return events;
         }
 
+        // Apply external hook logic
+        events.extend(hook(&mut self.chart, t));
+
+        // Advance inner Hold logic
         for (line_idx, line) in self.chart.lines.iter_mut().enumerate() {
             for (note_idx, note) in line.notes.iter_mut().enumerate() {
                 if note.fake {
                     continue;
                 }
 
-                match &note.judge {
-                    JudgeStatus::NotJudged => {
-                        if self.autoplay && note.time <= t {
-                            match &note.kind {
-                                NoteKind::Hold { .. } => {
-                                    note.judge =
-                                        JudgeStatus::Hold(true, t, 0.0, false, f32::INFINITY);
-                                    events.push(JudgeEvent {
-                                        kind: JudgeEventKind::HoldStart,
-                                        line_idx,
-                                        note_idx,
-                                    });
-                                }
-                                _ => {
-                                    note.judge = JudgeStatus::Judged;
-                                    events.push(JudgeEvent {
-                                        kind: JudgeEventKind::Judged(Judgement::Perfect),
-                                        line_idx,
-                                        note_idx,
-                                    });
-                                }
-                            }
-                        } else if !self.autoplay && t - note.time > 0.22 {
-                            // Miss (LIMIT_BAD)
-                            note.judge = JudgeStatus::Judged;
+                if let JudgeStatus::Hold(perfect, at, diff, pre_judge, up_time) = &note.judge {
+                    if let NoteKind::Hold { end_time, .. } = &note.kind {
+                        if t >= *end_time {
+                            let j = if *perfect {
+                                Judgement::Perfect
+                            } else {
+                                Judgement::Good
+                            };
+                            events.push(JudgeEvent {
+                                kind: JudgeEventKind::HoldComplete(j),
+                                line_idx,
+                                note_idx,
+                            });
+                            note.judge = JudgeStatus::Judged(t, j);
+                        } else if t > *at {
+                            let j = if *perfect {
+                                Judgement::Perfect
+                            } else {
+                                Judgement::Good
+                            };
+                            note.judge = JudgeStatus::Hold(
+                                *perfect,
+                                *at + HOLD_PARTICLE_INTERVAL,
+                                *diff,
+                                *pre_judge,
+                                *up_time,
+                            );
+                            events.push(JudgeEvent {
+                                kind: JudgeEventKind::HoldTick(j),
+                                line_idx,
+                                note_idx,
+                            });
                         }
                     }
-                    JudgeStatus::Hold(perfect, at, diff, pre_judge, up_time) => {
-                        if let NoteKind::Hold { end_time, .. } = &note.kind {
-                            if t >= *end_time {
-                                let j = if *perfect {
-                                    Judgement::Perfect
-                                } else {
-                                    Judgement::Good
-                                };
-                                events.push(JudgeEvent {
-                                    kind: JudgeEventKind::HoldComplete(j),
-                                    line_idx,
-                                    note_idx,
-                                });
-                                note.judge = JudgeStatus::Judged;
-                            } else if t > *at {
-                                // Advance particle tick timer
-                                let j = if *perfect {
-                                    Judgement::Perfect
-                                } else {
-                                    Judgement::Good
-                                };
-                                // Reconstruct to update `at`
-                                note.judge = JudgeStatus::Hold(
-                                    *perfect,
-                                    *at + HOLD_PARTICLE_INTERVAL,
-                                    *diff,
-                                    *pre_judge,
-                                    *up_time,
-                                );
-                                events.push(JudgeEvent {
-                                    kind: JudgeEventKind::HoldTick(j),
-                                    line_idx,
-                                    note_idx,
-                                });
-                            }
-                        }
-                    }
-                    _ => {} // Judged, PreJudge — no action
                 }
             }
         }
 
         events
+    }
+
+    pub fn has_unjudged(&self, t: f32) -> bool {
+        // We use 0.400s here instead of 0.160s. The real phira client physics tick runs at e.g. 60 UPS.
+        // It detects the 'Miss' strictly > 0.160s, meaning the frame where it evaluates Miss
+        // might naturally be at ~0.167s - 0.200s! If our monitor limit perfectly matches 0.160s,
+        // we'd pause the clock *before* the event's naturally generated timestamp, deadlocking it.
+        let limit = 0.400;
+        for (line_idx, line) in self.chart.lines.iter().enumerate() {
+            for (note_idx, note) in line.notes.iter().enumerate() {
+                if note.fake {
+                    continue;
+                }
+                if matches!(note.judge, JudgeStatus::NotJudged) && t - note.time > limit {
+                    console_log!("GameMonitor: found unjudged Note ({line_idx}, {note_idx})");
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn clear_stale_notes(&mut self, player_time: f32) {
+        let limit = 0.200;
+        for line in &mut self.chart.lines {
+            for note in &mut line.notes {
+                if note.fake {
+                    continue;
+                }
+                if matches!(note.judge, JudgeStatus::NotJudged) && player_time - note.time > limit {
+                    note.judge = JudgeStatus::Judged(player_time, Judgement::Miss); // Stale notes are misses
+                }
+            }
+        }
     }
 
     pub fn render(&mut self, res: &mut Resource, renderer: &mut Renderer) {
