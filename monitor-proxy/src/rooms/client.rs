@@ -280,47 +280,11 @@ async fn process(state: Arc<ClientState>, cmd: ServerCommand) {
                 .await
                 .inspect_err(|e| log::warn!("error setting room result: {e}"));
         }
-        ServerCommand::CreateRoomEvent { room, data } => {
-            let s = json!({"room": room.to_string(), "data": data}).to_string();
+        ServerCommand::RoomEvent { event_type, data } => {
             let _ = state
-                .push_event(Event::default().event("create_room").data(s))
+                .push_event(Event::default().event(&event_type).data(data.to_string()))
                 .await
-                .inspect_err(|e| log::warn!("error sending create_room event: {e}"));
-        }
-        ServerCommand::UpdateRoomEvent { room, data } => {
-            let s = json!({"room": room.to_string(), "data": data}).to_string();
-            let _ = state
-                .push_event(Event::default().event("update_room").data(s))
-                .await
-                .inspect_err(|e| log::warn!("error sending update_room event: {e}"));
-        }
-        ServerCommand::JoinRoomEvent { room, user } => {
-            let s = json!({"room": room.to_string(), "user": user}).to_string();
-            let _ = state
-                .push_event(Event::default().event("join_room").data(s))
-                .await
-                .inspect_err(|e| log::warn!("error sending join_room event: {e}"));
-        }
-        ServerCommand::LeaveRoomEvent { room, user } => {
-            let s = json!({"room": room.to_string(), "user": user}).to_string();
-            let _ = state
-                .push_event(Event::default().event("leave_room").data(s))
-                .await
-                .inspect_err(|e| log::warn!("error sending leave_room event: {e}"));
-        }
-        ServerCommand::PlayerScoreEvent { room, record } => {
-            let s = json!({"room": room.to_string(), "record": record}).to_string();
-            let _ = state
-                .push_event(Event::default().event("player_score").data(s))
-                .await
-                .inspect_err(|e| log::warn!("error sending player_score event: {e}"));
-        }
-        ServerCommand::StartRoundEvent { room } => {
-            let s = json!({"room": room.to_string()}).to_string();
-            let _ = state
-                .push_event(Event::default().event("start_round").data(s))
-                .await
-                .inspect_err(|e| log::warn!("error sending start_round event: {e}"));
+                .inspect_err(|e| log::warn!("error sending {event_type} event: {e}"));
         }
         _ => {
             log::warn!("unsupported command: {cmd:?}, ignoring");
