@@ -35,6 +35,7 @@
 
 ```json
 [
+  // 房间信息列表
   {
     "name": "u123", // 房间 ID
     "data": {
@@ -43,10 +44,39 @@
       "lock": false, // 是否上锁
       "cycle": false, // 是否轮换房主
       "chart": 1001, // 选中的谱面 ID (null 表示未选)
-      "state": "PLAYING" // 状态: SELECTING_CHART, WAITING_FOR_READY, PLAYING
+      "state": "PLAYING", // 状态: SELECTING_CHART, WAITING_FOR_READY, PLAYING
+      "rounds": [
+        // 房间历史对局列表
+        {
+          "chart": 123, // 该对局的谱面 ID
+          "records": [
+            // 该对局的玩家成绩列表，每项均为一个 RecordData
+            // RecordData 格式见下文
+          ]
+        }
+      ]
     }
   }
 ]
+```
+
+其中 `RecordData` 的格式如下：
+
+```json
+{
+  "id": 1,
+  "player": 123,
+  "score": 1000000,
+  "perfect": 100,
+  "good": 0,
+  "bad": 0,
+  "miss": 0,
+  "max_combo": 100,
+  "accuracy": 1.0,
+  "full_combo": true,
+  "std": 0.0,
+  "std_score": 0.0
+}
 ```
 
 #### `GET /rooms/info/{id}`
@@ -69,31 +99,14 @@
 
 包含的事件类型：
 
-- `create_room`: `{"room": "id", "data": <RoomData>}`
 - `update_room`: `{"room": "id", "data": <PartialRoomData>}`
 - `join_room`: `{"room": "id", "user": <UserId>}`
 - `leave_room`: `{"room": "id", "user": <UserId>}`
-- `start_round`: `{"room": "id"}`
-- `player_score`: `{"room": "id", "record": <RecordData>}`
+- `new_round`: `{"room": "id", "round": <RoundData>}`
 
-其中 `RecordData` 的格式如下：
+对于 `update_room`，若房间 ID 不存在，那么代表创建新房间。
 
-```json
-{
-  "id": 1,
-  "player": 123,
-  "score": 1000000,
-  "perfect": 100,
-  "good": 0,
-  "bad": 0,
-  "miss": 0,
-  "max_combo": 100,
-  "accuracy": 1.0,
-  "full_combo": true,
-  "std": 0.0,
-  "std_score": 0.0
-}
-```
+当建立 SSE 连接时，服务端立刻发送若干 `update_room` 事件，表示当前所有房间的状态。
 
 #### `POST /auth/login`
 
