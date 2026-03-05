@@ -17,6 +17,7 @@
     "jszip": "^3.10.1",
     "monitor-client": "file:./pkg",
     "naive-ui": "^2.43.2",
-    "vue": "^3.5.28"
+    "vue": "^3.5.28",
+    "vue-i18n": "^11.2.8"
   }
 }

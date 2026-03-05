@@ -8,7 +8,9 @@
       >
         <!-- Auth Section -->
         <section class="section">
-          <n-text depth="3" class="section-title">Authentication</n-text>
+          <n-text depth="3" class="section-title">{{
+            t("monitor.auth.title")
+          }}</n-text>
           <div v-if="user" class="auth-info">
             <div class="user-row">
               <n-text strong>{{ user.username }}</n-text>
@@ -23,7 +25,7 @@
           <template v-else>
             <n-input
               v-model:value="email"
-              placeholder="Email"
+              :placeholder="t('monitor.auth.emailPlaceholder')"
               style="margin-bottom: 0.4rem"
             />
             <div class="input-group">
@@ -31,12 +33,12 @@
                 v-model:value="password"
                 type="password"
                 show-password-on="click"
-                placeholder="Password"
+                :placeholder="t('monitor.auth.passwordPlaceholder')"
                 style="flex: 1"
                 @keydown.enter="login"
               />
               <n-button type="primary" :loading="loggingIn" @click="login">
-                Login
+                {{ t("monitor.auth.login") }}
               </n-button>
             </div>
             <n-text v-if="authError" type="error" style="font-size: 0.78rem">
@@ -49,7 +51,9 @@
 
         <!-- Connection Section -->
         <section class="section">
-          <n-text depth="3" class="section-title">Connection</n-text>
+          <n-text depth="3" class="section-title">{{
+            t("monitor.connection.title")
+          }}</n-text>
           <div class="status-dot" :class="wsState">
             <span class="dot"></span>
             {{ wsLabel }}
@@ -61,7 +65,7 @@
               :disabled="!user || wsState === 'connected'"
               @click="connect"
             >
-              Connect
+              {{ t("monitor.connection.connect") }}
             </n-button>
             <n-button
               type="error"
@@ -79,11 +83,13 @@
 
         <!-- Room Section -->
         <section class="section">
-          <n-text depth="3" class="section-title">Room</n-text>
+          <n-text depth="3" class="section-title">{{
+            t("monitor.room.title")
+          }}</n-text>
           <div class="input-group">
             <n-input
               v-model:value="roomId"
-              placeholder="Room ID"
+              :placeholder="t('monitor.room.roomIdPlaceholder')"
               style="flex: 1"
             />
             <n-button
@@ -91,10 +97,10 @@
               :disabled="wsState !== 'connected'"
               @click="joinRoom"
             >
-              Join
+              {{ t("monitor.room.join") }}
             </n-button>
             <n-button :disabled="wsState !== 'connected'" @click="leaveRoom">
-              Leave
+              {{ t("monitor.room.leave") }}
             </n-button>
           </div>
         </section>
@@ -103,11 +109,13 @@
 
         <!-- Player Monitor Section -->
         <section class="section">
-          <n-text depth="3" class="section-title">Monitor</n-text>
+          <n-text depth="3" class="section-title">{{
+            t("monitor.monitor.title")
+          }}</n-text>
           <n-select
             v-model:value="selectedUserId"
             :options="playerOptions"
-            placeholder="Select player…"
+            :placeholder="t('monitor.monitor.selectPlayer')"
             :disabled="!monitor || roomUsers.length === 0"
             @update:value="selectPlayer"
           />
@@ -124,7 +132,7 @@
             <n-text depth="3" style="font-size: 0.72rem; font-weight: 600">
               {{
                 roomUsers.find((u) => u.id === activeScene!.userId)?.name ||
-                "Player"
+                t("monitor.monitor.player")
               }}
               (#{{ activeScene!.userId }})
             </n-text>
@@ -145,7 +153,7 @@
         </div>
         <div v-else class="scene-empty">
           <n-text depth="3" italic style="font-size: 0.85rem">
-            Select a player from the sidebar to start monitoring.
+            {{ t("monitor.monitor.selectPrompt") }}
           </n-text>
         </div>
       </div>
@@ -163,10 +171,12 @@
             margin-bottom: 0.4rem;
           "
         >
-          <n-text depth="3" class="section-title" style="margin-bottom: 0"
-            >Event Log</n-text
-          >
-          <n-button quaternary size="tiny" @click="clearLog">Clear</n-button>
+          <n-text depth="3" class="section-title" style="margin-bottom: 0">{{
+            t("monitor.log.title")
+          }}</n-text>
+          <n-button quaternary size="tiny" @click="clearLog">{{
+            t("monitor.log.clear")
+          }}</n-button>
         </div>
         <div class="event-log" ref="logRef">
           <div
@@ -184,7 +194,7 @@
             italic
             style="font-size: 0.72rem"
           >
-            No events yet.
+            {{ t("monitor.log.empty") }}
           </n-text>
         </div>
       </n-card>
@@ -194,9 +204,12 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted } from "vue";
+import { useI18n } from "vue-i18n";
 import { NCard, NInput, NButton, NText, NDivider, NSelect } from "naive-ui";
 import type { SelectOption } from "naive-ui";
 import wasmInit, { GameMonitor } from "monitor-client";
+
+const { t } = useI18n();
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
@@ -235,7 +248,7 @@ const roomId = ref("");
 const wsState = ref<"disconnected" | "connecting" | "connected">(
   "disconnected",
 );
-const wsLabel = ref("Disconnected");
+const wsLabel = ref(t("monitor.connection.disconnected"));
 const eventLog = ref<LogEntry[]>([]);
 const logRef = ref<HTMLDivElement | null>(null);
 
@@ -409,11 +422,14 @@ function onCanvasRef(userId: number, el: HTMLCanvasElement | null) {
         } else {
           applyResize();
         }
-        log(`Scene attached for player #${userId}`, "event");
+        log(t("monitor.messages.sceneAttached", { id: userId }), "event");
       }
     } catch (e) {
       scene.isCreated = false;
-      log(`Failed to attach scene for #${userId}: ${e}`, "error");
+      log(
+        t("monitor.messages.sceneAttachFailed", { id: userId, error: e }),
+        "error",
+      );
     }
   });
 }
@@ -436,7 +452,7 @@ function selectPlayer(uid: number) {
   selectedUserId.value = uid;
   const canvasId = `scene-canvas-${uid}-${sceneCounter++}`;
   activeScene.value = { userId: uid, canvasId, isCreated: false };
-  log(`Monitoring player #${uid}`, "info");
+  log(t("monitor.messages.monitoringPlayer", { id: uid }), "info");
 }
 
 function detachCurrentScene() {
@@ -462,7 +478,10 @@ async function checkAuth() {
     });
     if (resp.ok) {
       user.value = await resp.json();
-      log(`Authenticated as ${user.value!.username}`, "event");
+      log(
+        t("monitor.messages.authenticated", { name: user.value!.username }),
+        "event",
+      );
     } else {
       // Token expired or invalid — clear it
       authToken.value = null;
@@ -484,7 +503,7 @@ async function login() {
     });
     if (!resp.ok) {
       const errData = await resp.json().catch(() => ({}));
-      authError.value = errData.error || "Login failed";
+      authError.value = errData.error || t("monitor.auth.loginFailed");
       return;
     }
     const data = await resp.json();
@@ -493,7 +512,7 @@ async function login() {
     await checkAuth();
     password.value = "";
   } catch (e) {
-    authError.value = `Network error: ${e}`;
+    authError.value = t("monitor.auth.networkError", { error: e });
   } finally {
     loggingIn.value = false;
   }
@@ -503,10 +522,10 @@ async function login() {
 async function connect() {
   if (!user.value) return;
   if (!wasmReady) {
-    log("Initializing WASM...", "warn");
+    log(t("monitor.messages.initWasm"), "warn");
     await wasmInit();
     wasmReady = true;
-    log("WASM initialized");
+    log(t("monitor.messages.wasmReady"));
   }
   if (monitor) {
     try {
@@ -519,19 +538,19 @@ async function connect() {
 
   const wsUrl = `${wsBaseFromApi(API_BASE)}/ws/live?token=${encodeURIComponent(authToken.value!)}`;
   wsState.value = "connecting";
-  wsLabel.value = "Connecting...";
-  log(`Connecting to ${wsUrl}...`);
+  wsLabel.value = t("monitor.connection.connecting");
+  log(t("monitor.messages.connectingTo", { url: wsUrl }));
 
   try {
     monitor = new GameMonitor(wsUrl, API_BASE);
     wsState.value = "connected";
-    wsLabel.value = "Connected";
-    log("WebSocket opened", "event");
+    wsLabel.value = t("monitor.connection.connected");
+    log(t("monitor.messages.wsOpened"), "event");
     startTicking();
   } catch (e) {
     wsState.value = "disconnected";
-    wsLabel.value = "Connection Failed";
-    log(`Connection failed: ${e}`, "error");
+    wsLabel.value = t("monitor.connection.connectionFailed");
+    log(t("monitor.messages.connFailed", { error: e }), "error");
   }
 }
 
@@ -546,17 +565,17 @@ function disconnect() {
   roomUsers.value = [];
   stopTicking();
   wsState.value = "disconnected";
-  wsLabel.value = "Disconnected";
-  log("Disconnected", "warn");
+  wsLabel.value = t("monitor.connection.disconnected");
+  log(t("monitor.messages.disconnected"), "warn");
 }
 
 function joinRoom() {
   if (!monitor || !roomId.value) return;
   try {
     monitor.join_room(roomId.value);
-    log(`Sent: JoinRoom(${roomId.value})`, "event");
+    log(t("monitor.messages.sentJoinRoom", { id: roomId.value }), "event");
   } catch (e) {
-    log(`Join failed: ${e}`, "error");
+    log(t("monitor.messages.joinFailed", { error: e }), "error");
   }
 }
 
@@ -566,9 +585,9 @@ function leaveRoom() {
     monitor.leave_room();
     clearAllScenes();
     roomUsers.value = [];
-    log("Sent: LeaveRoom", "event");
+    log(t("monitor.messages.sentLeaveRoom"), "event");
   } catch (e) {
-    log(`Leave failed: ${e}`, "error");
+    log(t("monitor.messages.leaveFailed", { error: e }), "error");
   }
 }
 
@@ -598,8 +617,8 @@ function handleDisconnect() {
   monitor = null;
   stopTicking();
   wsState.value = "disconnected";
-  wsLabel.value = "Disconnected";
-  log("WebSocket disconnected", "warn");
+  wsLabel.value = t("monitor.connection.disconnected");
+  log(t("monitor.messages.wsDisconnected"), "warn");
 }
 
 // Intercept console.log to capture "GameMonitor:" messages

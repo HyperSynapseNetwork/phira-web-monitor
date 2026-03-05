@@ -8,7 +8,9 @@
       >
         <!-- Status Section -->
         <section class="section">
-          <n-text depth="3" class="section-title">Status</n-text>
+          <n-text depth="3" class="section-title">{{
+            t("player.status.title")
+          }}</n-text>
           <n-text depth="2" style="font-size: 0.82rem">{{ statusText }}</n-text>
           <n-text depth="3" style="font-size: 0.82rem">{{ wasmStatus }}</n-text>
         </section>
@@ -17,21 +19,23 @@
 
         <!-- Chart Loader Section -->
         <section class="section">
-          <n-text depth="3" class="section-title">Chart Loader</n-text>
+          <n-text depth="3" class="section-title">{{
+            t("player.chartLoader.title")
+          }}</n-text>
           <div class="input-group">
             <n-input
               v-model:value="chartId"
-              placeholder="Chart ID (e.g. 1234)"
+              :placeholder="t('player.chartLoader.placeholder')"
               style="flex: 1"
               @keydown.enter="loadChart"
             />
             <n-button type="primary" :loading="isLoading" @click="loadChart">
-              Load
+              {{ t("player.chartLoader.load") }}
             </n-button>
           </div>
           <div class="parse-result" :class="parseClass">{{ parseResult }}</div>
           <n-text depth="3" italic style="font-size: 0.7rem">
-            Tip: Use ID "test" for a local test chart.
+            {{ t("player.chartLoader.tip") }}
           </n-text>
         </section>
 
@@ -39,20 +43,30 @@
 
         <!-- Playback Section -->
         <section class="section">
-          <n-text depth="3" class="section-title">Playback</n-text>
+          <n-text depth="3" class="section-title">{{
+            t("player.playback.title")
+          }}</n-text>
           <div class="input-group">
             <n-button
               :type="isPaused ? 'success' : 'error'"
               style="flex: 1"
               @click="togglePlay"
             >
-              {{ isPaused ? "Play" : "Pause" }}
+              {{
+                isPaused
+                  ? t("player.playback.play")
+                  : t("player.playback.pause")
+              }}
             </n-button>
             <n-button
               :type="isAutoplay ? 'primary' : 'default'"
               @click="toggleAutoplay"
             >
-              Autoplay: {{ isAutoplay ? "ON" : "OFF" }}
+              {{
+                isAutoplay
+                  ? t("player.playback.autoplayOn")
+                  : t("player.playback.autoplayOff")
+              }}
             </n-button>
           </div>
         </section>
@@ -61,31 +75,36 @@
         <template v-if="chartInfo">
           <n-divider />
           <section class="section">
-            <n-text depth="3" class="section-title">Chart Info</n-text>
+            <n-text depth="3" class="section-title">{{
+              t("player.chartInfo.title")
+            }}</n-text>
             <n-descriptions label-placement="left" :column="1" size="small">
-              <n-descriptions-item label="Song">
+              <n-descriptions-item :label="t('player.chartInfo.song')">
                 {{ chartInfo.name }}
               </n-descriptions-item>
-              <n-descriptions-item label="Composer">
+              <n-descriptions-item :label="t('player.chartInfo.composer')">
                 {{ chartInfo.composer }}
               </n-descriptions-item>
-              <n-descriptions-item label="Charter">
+              <n-descriptions-item :label="t('player.chartInfo.charter')">
                 {{ chartInfo.charter }}
               </n-descriptions-item>
-              <n-descriptions-item label="Level">
+              <n-descriptions-item :label="t('player.chartInfo.level')">
                 {{ chartInfo.level }}
               </n-descriptions-item>
             </n-descriptions>
             <div class="stats">
-              <n-statistic label="Difficulty" tabular-nums>
+              <n-statistic
+                :label="t('player.chartInfo.difficulty')"
+                tabular-nums
+              >
                 <template #default>{{
                   chartInfo.difficulty.toFixed(1)
                 }}</template>
               </n-statistic>
-              <n-statistic label="Offset" tabular-nums>
+              <n-statistic :label="t('player.chartInfo.offset')" tabular-nums>
                 <template #default>{{ chartInfo.offset.toFixed(3) }}</template>
               </n-statistic>
-              <n-statistic label="Format" tabular-nums>
+              <n-statistic :label="t('player.chartInfo.format')" tabular-nums>
                 <template #default>{{
                   (chartInfo.format || "unknown").toUpperCase()
                 }}</template>
@@ -107,6 +126,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   NCard,
   NInput,
@@ -119,16 +139,18 @@ import {
 } from "naive-ui";
 import init, { ChartPlayer } from "monitor-client";
 
+const { t } = useI18n();
+
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
-const statusText = ref("Initializing...");
-const wasmStatus = ref("Loading WASM...");
+const statusText = ref(t("player.status.initializing"));
+const wasmStatus = ref(t("player.status.loadingWasm"));
 const chartId = ref("");
 const isLoading = ref(false);
 const isPaused = ref(true);
 const isAutoplay = ref(true);
-const parseResult = ref("Enter an ID to load.");
+const parseResult = ref(t("player.chartLoader.enterIdPrompt"));
 const parseClass = ref("");
 const chartInfo = ref<any>(null);
 
@@ -178,20 +200,24 @@ async function loadResourcePack() {
 async function loadChart() {
   if (!player || !chartId.value) return;
   isLoading.value = true;
-  statusText.value = `Loading Chart ${chartId.value}...`;
+  statusText.value = t("player.chartLoader.loadingChart", {
+    id: chartId.value,
+  });
   parseClass.value = "loading";
-  parseResult.value = "Loading...";
+  parseResult.value = t("player.chartLoader.loading");
   try {
     const info = (await player.load_chart(chartId.value)) as any;
     chartInfo.value = info;
-    parseResult.value = `Loaded: ${info.name}`;
+    parseResult.value = t("player.chartLoader.loaded", { name: info.name });
     parseClass.value = "success";
-    statusText.value = `Chart ${chartId.value} loaded`;
+    statusText.value = t("player.chartLoader.chartLoaded", {
+      id: chartId.value,
+    });
     isPaused.value = true;
   } catch (e) {
     parseResult.value = `Error: ${e}`;
     parseClass.value = "error";
-    statusText.value = `Error loading chart`;
+    statusText.value = t("player.chartLoader.errorLoading");
   } finally {
     isLoading.value = false;
     resize();
@@ -237,11 +263,11 @@ onMounted(async () => {
   window.addEventListener("resize", resize);
   resize();
   await init();
-  wasmStatus.value = "Running";
+  wasmStatus.value = t("player.status.running");
   const canvas = canvasRef.value;
   if (!canvas) return;
   player = new ChartPlayer("gl-canvas", API_BASE || undefined);
-  statusText.value = "Active";
+  statusText.value = t("player.status.active");
   (window as any).chartPlayer = player;
   loadResourcePack();
   rafId = requestAnimationFrame(renderLoop);

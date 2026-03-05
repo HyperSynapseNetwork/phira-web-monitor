@@ -1,20 +1,53 @@
 <template>
-  <n-config-provider :theme="darkTheme" :theme-overrides="themeOverrides">
+  <n-config-provider
+    :theme="darkTheme"
+    :theme-overrides="themeOverrides"
+    :locale="naiveLocale"
+    :date-locale="naiveDateLocale"
+  >
     <n-global-style />
     <div class="app">
       <nav class="top-nav">
-        <h1 class="brand">Phira Web Monitor</h1>
-        <n-space :size="4">
+        <h1 class="brand">{{ $t("nav.brand") }}</h1>
+        <n-space :size="4" align="center">
           <n-button
             v-for="tab in tabs"
             :key="tab.key"
-            :quaternary="activeTab !== tab.key"
             :type="activeTab === tab.key ? 'primary' : 'default'"
             size="small"
             @click="activeTab = tab.key"
           >
-            {{ tab.label }}
+            {{ $t(tab.labelKey) }}
           </n-button>
+          <n-divider vertical style="height: 20px; margin: 0 4px" />
+          <n-dropdown
+            :options="localeOptions"
+            :value="locale"
+            trigger="click"
+            @select="switchLocale"
+          >
+            <n-button size="small">
+              <template #icon>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M2 12h20" />
+                  <path
+                    d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
+                  />
+                </svg>
+              </template>
+            </n-button>
+          </n-dropdown>
         </n-space>
       </nav>
       <!-- Both views stay mounted to preserve WebGL/WS state.
@@ -32,21 +65,58 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   darkTheme,
   NConfigProvider,
   NGlobalStyle,
   NButton,
   NSpace,
+  NDivider,
+  NDropdown,
+  enUS,
+  dateEnUS,
+  zhCN,
+  dateZhCN,
 } from "naive-ui";
-import type { GlobalThemeOverrides } from "naive-ui";
+import type { GlobalThemeOverrides, NLocale, NDateLocale } from "naive-ui";
 import PlayerView from "./views/PlayerView.vue";
 import MonitorView from "./views/MonitorView.vue";
+import { supportedLocales, type SupportedLocale } from "./i18n";
+
+const { t, locale } = useI18n();
+
+const localeOptions = computed(() =>
+  supportedLocales.map((loc) => ({
+    label: t("lang." + loc),
+    key: loc,
+  })),
+);
+
+const naiveLocaleMap: Record<SupportedLocale, NLocale> = {
+  en: enUS,
+  "zh-CN": zhCN,
+};
+const naiveDateLocaleMap: Record<SupportedLocale, NDateLocale> = {
+  en: dateEnUS,
+  "zh-CN": dateZhCN,
+};
+const naiveLocale = computed(
+  () => naiveLocaleMap[locale.value as SupportedLocale] ?? enUS,
+);
+const naiveDateLocale = computed(
+  () => naiveDateLocaleMap[locale.value as SupportedLocale] ?? dateEnUS,
+);
+
+function switchLocale(loc: SupportedLocale) {
+  locale.value = loc;
+  localStorage.setItem("locale", loc);
+}
 
 const tabs = [
-  { key: "play" as const, label: "Play" },
-  { key: "monitor" as const, label: "Monitor" },
+  { key: "play" as const, labelKey: "nav.play" },
+  { key: "monitor" as const, labelKey: "nav.monitor" },
 ];
 const activeTab = ref<"play" | "monitor">("monitor");
 
