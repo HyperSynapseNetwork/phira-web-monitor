@@ -21,6 +21,101 @@
 
 代理服务器，作为应用的主后端。
 
+#### 数据格式定义
+
+所有的接口交互均使用以下 TypeScript 接口定义为基础：
+
+```typescript
+// === 认证与用户信息相关 (Auth) ===
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  token: string;
+}
+
+export interface ProfileResponse {
+  id: number;
+  username: string;
+  phira_avatar: string | null;
+  phira_id: number;
+  phira_rks: number;
+  phira_username: string;
+  register_time: string; // ISO 8601 格式的时间字符串
+  last_login_time: string; // ISO 8601 格式的时间字符串
+}
+
+// === 房间信息及列表相关 (Rooms) ===
+
+export interface RoomListResponse {
+  total: number; // 房间总数
+  rooms: RoomInfoResponse[]; // 房间详细信息列表
+}
+
+export interface RoomInfoResponse {
+  name: string; // 房间 ID 标识符
+  data: RoomData;
+}
+
+export interface RoomData {
+  host: number; // 房主 ID (-1 表示无房主)
+  users: number[]; // 房间内用户 ID 列表
+  lock: boolean; // 是否上锁
+  cycle: boolean; // 是否轮换房主
+  chart: number | null; // 选中的谱面 ID (null 表示未选)
+  state: "SELECTING_CHART" | "WAITING_FOR_READY" | "PLAYING"; // 房间所处状态
+  rounds: RoundData[]; // 房间历史对局列表
+}
+
+export interface RoundData {
+  chart: number; // 该对局的谱面 ID (-1 表示无)
+  records: RecordData[]; // 该对局的玩家成绩列表
+}
+
+export interface RecordData {
+  id: number;
+  player: number;
+  score: number;
+  perfect: number;
+  good: number;
+  bad: number;
+  miss: number;
+  max_combo: number;
+  accuracy: number; // 例如 1.0 代表 100%
+  full_combo: boolean;
+  std: number;
+  std_score: number;
+}
+```
+
+针对 SSE（`GET /rooms/listen`）的事件定义：
+
+```typescript
+// === SSE 房间监听事件 (SSE) ===
+
+// 房间状态更新事件（可能全量也可能包含了某些特定字段修改）
+// 建立连接时立刻收到 `create_room` 代表初始化全量数据
+export interface SSEEventUpdateRoom {
+  room: string;
+  data: Partial<RoomData>; // 数据更新（如果不存在，前台可理解为创建房间）
+}
+
+// 玩家加入房间或离开房间事件
+export interface SSEEventJoinOrLeaveRoom {
+  room: string;
+  user: number;
+}
+
+// 包含了新的对局结算
+export interface SSEEventNewRound {
+  room: string;
+  round: RoundData;
+}
+```
+
 #### `GET /chart/{id}`
 
 **说明**：获取指定 `id` 谱面的二进制数据，供 `monitor-client` 解码使用。
@@ -31,65 +126,19 @@
 
 **说明**：获取当前所有活跃房间的列表。
 
-**响应格式**：`application/json`。
-
-```json
-[
-  // 房间信息列表
-  {
-    "name": "u123", // 房间 ID
-    "data": {
-      "host": 123, // 房主 ID (-1 表示无房主)
-      "users": [123, 456], // 房间内用户 ID 列表
-      "lock": false, // 是否上锁
-      "cycle": false, // 是否轮换房主
-      "chart": 1001, // 选中的谱面 ID (null 表示未选)
-      "state": "PLAYING", // 状态: SELECTING_CHART, WAITING_FOR_READY, PLAYING
-      "rounds": [
-        // 房间历史对局列表
-        {
-          "chart": 123, // 该对局的谱面 ID
-          "records": [
-            // 该对局的玩家成绩列表，每项均为一个 RecordData
-            // RecordData 格式见下文
-          ]
-        }
-      ]
-    }
-  }
-]
-```
-
-其中 `RecordData` 的格式如下：
-
-```json
-{
-  "id": 1,
-  "player": 123,
-  "score": 1000000,
-  "perfect": 100,
-  "good": 0,
-  "bad": 0,
-  "miss": 0,
-  "max_combo": 100,
-  "accuracy": 1.0,
-  "full_combo": true,
-  "std": 0.0,
-  "std_score": 0.0
-}
-```
+**响应格式**：`application/json`，格式为 `RoomListResponse`。
 
 #### `GET /rooms/info/{id}`
 
 **说明**：获取指定 `id` 房间的详细信息。
 
-**响应格式**：`application/json`（格式同 `GET /rooms/info` 中的 `data` 字段）。
+**响应格式**：`application/json`，格式为 `RoomInfoResponse`。
 
 #### `GET /rooms/user/{id}`
 
 **说明**：查询指定用户（ID）当前所在的房间。
 
-**响应格式**：`application/json` (房间数据，如果不在任何房间中则为 `null`)。
+**响应格式**：`application/json`，格式为 `RoomInfoResponse` (如果不在任何房间中则为 `null`)。
 
 #### `GET /rooms/listen`
 
@@ -99,54 +148,24 @@
 
 包含的事件类型：
 
-- `update_room`: `{"room": "id", "data": <PartialRoomData>}`
-- `join_room`: `{"room": "id", "user": <UserId>}`
-- `leave_room`: `{"room": "id", "user": <UserId>}`
-- `new_round`: `{"room": "id", "round": <RoundData>}`
-
-对于 `update_room`，若房间 ID 不存在，那么代表创建新房间。
-
-当建立 SSE 连接时，服务端立刻发送若干 `update_room` 事件，表示当前所有房间的状态。
+- `update_room`: 发送 `SSEEventUpdateRoom` 结构的 JSON 数据。若房间 ID 不存在，那么代表创建新房间。当建立 SSE 连接时，服务端立刻发送若干 `update_room` 事件，表示当前所有房间的状态。
+- `join_room`: 发送 `SSEEventJoinOrLeaveRoom` 结构的 JSON 数据。
+- `leave_room`: 发送 `SSEEventJoinOrLeaveRoom` 结构的 JSON 数据。
+- `new_round`: 发送 `SSEEventNewRound` 结构的 JSON 数据。
 
 #### `POST /auth/login`
 
 **说明**：代理到官方 Phira 认证接口的登录端点。成功后返回一个 JWT Token，前端需要保存该 Token 用于后续的认证请求。
 
-**请求格式**：`application/json`。
+**请求格式**：`application/json`，格式为 `LoginRequest`。
 
-```json
-{
-  "email": "user@example.com",
-  "password": "password"
-}
-```
-
-**响应格式**：`application/json`。
-
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-}
-```
+**响应格式**：`application/json`，格式为 `LoginResponse`。
 
 #### `GET /auth/me`
 
 **说明**：获取当前 JWT Token 对应的用户资料数据（在 Phira 原生数据的缓存）。需要在请求头中携带 `Authorization: Bearer <token>`。
 
-**响应格式**：`application/json`。
-
-```json
-{
-  "id": 123,
-  "username": "User",
-  "phira_id": 123,
-  "phira_username": "User",
-  "phira_avatar": "avatar_url", // 可能为 null
-  "phira_rks": 15.5,
-  "register_time": "2023-01-01T00:00:00Z",
-  "last_login_time": "2023-01-01T00:00:00Z"
-}
-```
+**响应格式**：`application/json`，格式为 `ProfileResponse`。
 
 ---
 
