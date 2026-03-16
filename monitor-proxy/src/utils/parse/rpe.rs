@@ -164,6 +164,7 @@ struct RPEChart {
 
 type BezierMap = HashMap<(u16, i16, i16), BezierTween>;
 
+#[allow(dead_code)]
 fn bezier_key<T>(event: &RPEEvent<T>) -> (u16, i16, i16) {
     let p = &event.bezier_points;
     let int = |p: f32| (p * 100.).round() as i16;
