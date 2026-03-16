@@ -113,7 +113,7 @@ impl RoomService {
         let mut init_events = Vec::new();
         for (id, data) in &room_state.0 {
             let s = json!({"room": id.to_string(), "data": data.clone()}).to_string();
-            init_events.push(Ok(Event::default().event("create_room").data(s)));
+            init_events.push(Ok(Event::default().event("update_room").data(s)));
         }
         for event in events.iter() {
             init_events.push(Ok(event.clone()));
