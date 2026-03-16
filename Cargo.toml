@@ -3,5 +3,6 @@ resolver = "2"
 members = [
     "monitor-common",
     "monitor-proxy",
+    "monitor-proxy/migration",
     "monitor-client",
 ]
