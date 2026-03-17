@@ -38,4 +38,8 @@ pub struct Config {
     /// Allowed CORS origin (used when --debug is not set)
     #[arg(long)]
     pub allowed_origin: Option<String>,
+
+    /// Database URL (e.g. sqlite://data.db?mode=rwc)
+    #[arg(long, env = "DATABASE_URL")]
+    pub database_url: String,
 }

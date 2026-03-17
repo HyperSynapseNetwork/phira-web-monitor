@@ -18,6 +18,7 @@ pub fn init_router(state: AppState) -> Router {
         ));
     let public_routes = Router::new()
         .route("/auth/login", post(handlers::login))
+        .route("/visited", get(handlers::get_visited_users))
         .route("/chart/{id}", get(handlers::get_chart))
         .route("/rooms/info", get(handlers::get_room_list))
         .route("/rooms/info/{id}", get(handlers::get_room_by_id))

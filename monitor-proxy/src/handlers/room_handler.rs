@@ -3,7 +3,7 @@ use crate::{
     AppState,
 };
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::{
         sse::{Event, KeepAlive},
         IntoResponse, Response, Sse,
@@ -12,6 +12,7 @@ use axum::{
 };
 use futures::Stream;
 use phira_mp_common::RoomId;
+use serde::Deserialize;
 use std::{convert::Infallible, time::Duration};
 
 pub async fn get_room_list(State(state): State<AppState>) -> Result<Response> {
@@ -49,4 +50,21 @@ pub async fn listen(
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     Sse::new(state.room_service.listen_stream().await)
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
+}
+
+#[derive(Deserialize)]
+pub struct GetVisitedUsersParams {
+    #[serde(default)]
+    count_only: bool,
+}
+
+pub async fn get_visited_users(
+    State(state): State<AppState>,
+    Query(params): Query<GetVisitedUsersParams>,
+) -> Result<Response> {
+    state
+        .room_service
+        .get_visited(&state, params.count_only)
+        .await
+        .map(|s| Json(s).into_response())
 }

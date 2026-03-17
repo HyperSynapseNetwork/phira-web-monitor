@@ -1,18 +1,22 @@
 use crate::{
-    dtos::{RoomInfoResponse, RoomListResponse},
+    dtos::{RoomInfoResponse, RoomListResponse, VisitedUserInfo, VisitedUserListResponse},
+    entity::visited_user,
     error::{AppErrorExt, Result},
     utils::{MpClient, MpClientState, SResult, TaskResult},
+    AppState,
 };
 use anyhow::Error;
 use axum::response::sse::Event;
 use futures::StreamExt;
 use log::warn;
 use phira_mp_common::{
-    generate_secret_key, ClientCommand, ClientRoomState, RoomId, ServerCommand, UserInfo,
+    generate_secret_key, ClientCommand, ClientRoomState, RoomData, RoomEvent, RoomId,
+    ServerCommand, UserInfo,
 };
-use serde_json::{json, Value};
+use sea_orm::{sea_query::OnConflict, EntityTrait, PaginatorTrait};
+use serde_json::json;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     convert::Infallible,
     time::{Duration, Instant},
 };
@@ -21,11 +25,12 @@ use tokio_stream::wrappers::BroadcastStream;
 
 struct RoomMonitorState {
     authenticate_result: TaskResult<SResult<(UserInfo, Option<ClientRoomState>)>>,
-    room_result: TaskResult<SResult<(HashMap<RoomId, Value>, HashMap<i32, RoomId>)>>,
+    room_result: TaskResult<SResult<(HashMap<RoomId, RoomData>, HashMap<i32, RoomId>)>>,
 
     /// (room state, update events, next sync time)
-    cached_room_state: RwLock<(HashMap<RoomId, Value>, HashMap<i32, RoomId>)>,
+    cached_room_state: RwLock<(HashMap<RoomId, RoomData>, HashMap<i32, RoomId>)>,
     cached_events: RwLock<Vec<Event>>,
+    cached_visited_user: RwLock<HashSet<i32>>,
     next_sync_time: Mutex<Instant>,
     broadcast_tx: broadcast::Sender<Event>,
 }
@@ -47,9 +52,20 @@ impl MpClientState for RoomMonitorState {
                     .await
                     .inspect_err(|e| warn!("error setting room result: {e}"));
             }
-            ServerCommand::RoomEvent { event_type, data } => {
+            ServerCommand::RoomEvent(event) => {
+                match &event {
+                    RoomEvent::CreateRoom { data, .. } if data.host != -1 => {
+                        self.cached_visited_user.write().await.insert(data.host);
+                    }
+                    RoomEvent::JoinRoom { user, .. } => {
+                        self.cached_visited_user.write().await.insert(*user);
+                    }
+                    _ => {}
+                }
+                let event_type = event.event_type();
+                let data_str = event.inner().to_string();
                 let _ = self
-                    .push_event(Event::default().event(&event_type).data(data.to_string()))
+                    .push_event(Event::default().event(&event_type).data(data_str))
                     .await
                     .inspect_err(|e| warn!("error sending {event_type} event: {e}"));
             }
@@ -67,6 +83,7 @@ impl RoomMonitorState {
             room_result: TaskResult::new(),
             cached_room_state: RwLock::default(),
             cached_events: RwLock::default(),
+            cached_visited_user: RwLock::default(),
             next_sync_time: Mutex::new(Instant::now()),
             broadcast_tx: broadcast::channel(1024).0,
         }
@@ -89,6 +106,7 @@ impl RoomService {
         let client = MpClient::new(mp_server, RoomMonitorState::new()).await?;
         let key = generate_secret_key("room_monitor", 64)
             .expect("failed to generate key for room monitor");
+
         let this = Self { client };
         this.authenticate(&key).await?;
         Ok(this)
@@ -97,10 +115,9 @@ impl RoomService {
     pub async fn authenticate(&self, key: &[u8]) -> anyhow::Result<()> {
         self.client
             .authenticate_result
-            .acquire(async move || {
+            .acquire(|| {
                 self.client
                     .send(ClientCommand::RoomMonitorAuthenticate { key: key.into() })
-                    .await
             })
             .await?
             .map(|_| {})
@@ -174,7 +191,7 @@ impl RoomService {
             *self.client.cached_room_state.write().await = self
                 .client
                 .room_result
-                .acquire(async move || self.client.send(ClientCommand::QueryRoomInfo).await)
+                .acquire(|| self.client.send(ClientCommand::QueryRoomInfo))
                 .await?
                 .map_err(Error::msg)
                 .internal_server_error("failed to sync room info")?;
@@ -182,5 +199,61 @@ impl RoomService {
             *next_sync_time = Instant::now() + Duration::from_secs(1);
         }
         Ok(())
+    }
+
+    pub async fn get_visited(
+        &self,
+        state: &AppState,
+        count_only: bool,
+    ) -> Result<VisitedUserListResponse> {
+        self.try_update_visited(state).await?;
+        if count_only {
+            Ok(VisitedUserListResponse {
+                count: visited_user::Entity::find().count(&state.db).await?,
+                users: None,
+            })
+        } else {
+            let users: Vec<_> = visited_user::Entity::find()
+                .all(&state.db)
+                .await
+                .internal_server_error("failed to get visited users")?
+                .into_iter()
+                .map(|m| VisitedUserInfo {
+                    phira_id: m.phira_id,
+                })
+                .collect();
+            Ok(VisitedUserListResponse {
+                count: users.len() as u64,
+                users: Some(users),
+            })
+        }
+    }
+
+    async fn try_update_visited(&self, state: &AppState) -> Result<()> {
+        let cached_visited = std::mem::take(&mut *self.client.cached_visited_user.write().await);
+        if cached_visited.is_empty() {
+            return Ok(());
+        }
+
+        let iter = cached_visited.iter().map(|id| visited_user::ActiveModel {
+            phira_id: sea_orm::Set(*id),
+        });
+        let on_conflict = OnConflict::column(visited_user::Column::PhiraId)
+            .do_nothing()
+            .to_owned();
+        let res = visited_user::Entity::insert_many(iter)
+            .on_conflict(on_conflict)
+            .exec(&state.db)
+            .await
+            .internal_server_error("failed to update visited users");
+        if res.is_err() {
+            // put back data
+            self.client
+                .cached_visited_user
+                .write()
+                .await
+                .extend(cached_visited);
+        }
+        res.map(|_| ())
     }
 }

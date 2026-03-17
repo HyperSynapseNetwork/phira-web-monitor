@@ -155,7 +155,7 @@ impl GameMonitorClient {
     pub async fn leave_room(&self) -> anyhow::Result<SResult<()>> {
         let res = self
             .leave_result
-            .acquire(|| async move { self.send(ClientCommand::LeaveRoom).await })
+            .acquire(|| self.send(ClientCommand::LeaveRoom))
             .await?;
         let _ = self.event_tx.send(LiveEvent::Leave(res.clone()));
         Ok(res)
