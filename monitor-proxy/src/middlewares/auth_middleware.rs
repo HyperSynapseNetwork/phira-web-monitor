@@ -2,7 +2,6 @@ use crate::{
     error::{AppErrorExt, Result},
     AppState,
 };
-use anyhow::anyhow;
 use axum::{
     extract::{Query, Request, State},
     http::header,
@@ -35,20 +34,16 @@ pub async fn require_auth(
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
     {
-        if auth_header.starts_with("Bearer ") {
-            &auth_header[7..]
-        } else {
-            return Err(anyhow!("invalid Authorization header"))
-                .unauthorized("failed to authorize");
-        }
+        auth_header
+            .strip_prefix("Bearer ")
+            .unauthorized("invalid Authorization header")?
     } else {
-        &params
+        params
             .token
             .as_ref()
-            .ok_or_else(|| anyhow!("missing Authorization header"))
             .unauthorized("missing Authorization header")?
     };
-    let session = state.auth_service.decode(&token)?;
+    let session = state.auth_service.decode(token)?;
     req.extensions_mut().insert(session);
 
     Ok(next.run(req).await)

@@ -179,7 +179,7 @@ fn parse_events<T: Tweenable, V: Clone + Into<T>>(
 ) -> Result<Anim<T>> {
     let mut kfs = Vec::new();
     if let Some(default) = default {
-        if rpe.get(0).map_or(false, |e| e.start_time.beats() != 0.0) {
+        if rpe.first().is_some_and(|e| e.start_time.beats() != 0.0) {
             kfs.push(Keyframe::new(0.0, default, 0));
         }
     }
@@ -255,11 +255,9 @@ fn parse_speed_events(r: &mut BpmList, rpe: &[RPEEventLayer], max_time: f32) -> 
         let speed = sani.now();
         sani.set_time(end_time - 1e-4);
         let end_speed = sani.now();
-        if speed.signum() * end_speed.signum() < 0. {
-            if (speed - end_speed).abs() > EPS {
-                let t = f32::tween(&now_time, &end_time, speed / (speed - end_speed));
-                pts.push(t);
-            }
+        if speed.signum() * end_speed.signum() < 0. && (speed - end_speed).abs() > EPS {
+            let t = f32::tween(&now_time, &end_time, speed / (speed - end_speed));
+            pts.push(t);
         }
     }
     pts.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -476,7 +474,7 @@ fn parse_ctrl_events(rpe: &[RPECtrlEvent], key: &str) -> AnimFloat {
     }
     AnimFloat::new(
         rpe.iter()
-            .zip(vals.into_iter())
+            .zip(vals)
             .map(|(it, val)| {
                 Keyframe::new(
                     it.x,
@@ -590,8 +588,8 @@ async fn parse_judge_line(
                                 &e.scale_x_events,
                                 factor
                                     * if rpe.texture == "line.png"
-                                        && rpe.extended.as_ref().map_or(true, |it| {
-                                            it.text_events.as_ref().map_or(true, |it| it.is_empty())
+                                        && rpe.extended.as_ref().is_none_or(|it| {
+                                            it.text_events.as_ref().is_none_or(|it| it.is_empty())
                                         })
                                         && rpe.attach_ui.is_none()
                                     {
@@ -671,21 +669,7 @@ async fn parse_judge_line(
                 let events = parse_gif_events(r, events, bezier_map, &frames)
                     .context("gif-events-parse-failed")?;
                 JudgeLineKind::TextureGif(events, frames, rpe.texture.clone())
-            } else {
-                if let Some(texture) = line_texture_map.get(&rpe.texture) {
-                    JudgeLineKind::Texture(texture.clone(), rpe.texture.clone())
-                } else {
-                    let data = fs
-                        .load_file(&rpe.texture)
-                        .await
-                        .with_context(|| format!("illustration-load-failed: {}", rpe.texture))?;
-                    let texture = Texture::new(image::load_from_memory(&data)?);
-                    line_texture_map.insert(rpe.texture.clone(), texture.clone());
-                    JudgeLineKind::Texture(texture, rpe.texture.clone())
-                }
-            }
-        } else {
-            if let Some(texture) = line_texture_map.get(&rpe.texture) {
+            } else if let Some(texture) = line_texture_map.get(&rpe.texture) {
                 JudgeLineKind::Texture(texture.clone(), rpe.texture.clone())
             } else {
                 let data = fs
@@ -696,6 +680,16 @@ async fn parse_judge_line(
                 line_texture_map.insert(rpe.texture.clone(), texture.clone());
                 JudgeLineKind::Texture(texture, rpe.texture.clone())
             }
+        } else if let Some(texture) = line_texture_map.get(&rpe.texture) {
+            JudgeLineKind::Texture(texture.clone(), rpe.texture.clone())
+        } else {
+            let data = fs
+                .load_file(&rpe.texture)
+                .await
+                .with_context(|| format!("illustration-load-failed: {}", rpe.texture))?;
+            let texture = Texture::new(image::load_from_memory(&data)?);
+            line_texture_map.insert(rpe.texture.clone(), texture.clone());
+            JudgeLineKind::Texture(texture, rpe.texture.clone())
         },
         color: if let Some(events) = rpe.extended.as_ref().and_then(|e| e.color_events.as_ref()) {
             parse_events(r, events, Some(WHITE), bezier_map).context("color-events-parse-failed")?
@@ -776,7 +770,7 @@ pub async fn parse_rpe(source: &str, fs: &mut dyn ResourceLoader) -> Result<Char
             .map(|it| (it.start_time.beats(), it.bpm))
             .collect(),
     );
-    fn vec<'a, T>(v: &'a Option<Vec<T>>) -> impl Iterator<Item = &'a T> {
+    fn vec<T>(v: &Option<Vec<T>>) -> impl Iterator<Item = &T> {
         v.iter().flat_map(|it| it.iter())
     }
 

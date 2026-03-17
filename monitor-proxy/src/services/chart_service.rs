@@ -180,6 +180,12 @@ impl ChartService {
     }
 }
 
+impl Default for ChartService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 struct DirectoryLoader {
     directory: PathBuf,
 }

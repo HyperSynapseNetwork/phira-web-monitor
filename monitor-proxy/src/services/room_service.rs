@@ -23,12 +23,15 @@ use std::{
 use tokio::sync::{broadcast, Mutex, RwLock};
 use tokio_stream::wrappers::BroadcastStream;
 
+type RoomMap = HashMap<RoomId, RoomData>;
+type UserMap = HashMap<i32, RoomId>;
+
 struct RoomMonitorState {
     authenticate_result: TaskResult<SResult<(UserInfo, Option<ClientRoomState>)>>,
-    room_result: TaskResult<SResult<(HashMap<RoomId, RoomData>, HashMap<i32, RoomId>)>>,
+    room_result: TaskResult<SResult<(RoomMap, UserMap)>>,
 
     /// (room state, update events, next sync time)
-    cached_room_state: RwLock<(HashMap<RoomId, RoomData>, HashMap<i32, RoomId>)>,
+    cached_room_state: RwLock<(RoomMap, UserMap)>,
     cached_events: RwLock<Vec<Event>>,
     cached_visited_user: RwLock<HashSet<i32>>,
     next_sync_time: Mutex<Instant>,
@@ -65,7 +68,7 @@ impl MpClientState for RoomMonitorState {
                 let event_type = event.event_type();
                 let data_str = event.inner().to_string();
                 let _ = self
-                    .push_event(Event::default().event(&event_type).data(data_str))
+                    .push_event(Event::default().event(event_type).data(data_str))
                     .await
                     .inspect_err(|e| warn!("error sending {event_type} event: {e}"));
             }

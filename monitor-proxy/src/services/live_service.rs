@@ -33,7 +33,7 @@ impl GameMonitorState {
             join_result: TaskResult::new(),
             leave_result: TaskResult::new(),
 
-            event_tx: event_tx,
+            event_tx,
             selected_chart: AtomicI32::new(-1),
         }
     }
@@ -189,5 +189,11 @@ impl LiveService {
         let token = session.token.as_str();
         let (tx, rx) = mpsc::unbounded_channel();
         Ok((rx, GameMonitorClient::new(mp_server, token, tx).await?))
+    }
+}
+
+impl Default for LiveService {
+    fn default() -> Self {
+        Self::new()
     }
 }
