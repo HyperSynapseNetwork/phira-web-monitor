@@ -89,6 +89,17 @@ export interface RecordData {
   std: number;
   std_score: number;
 }
+
+// === 历史访问用户相关 (Visited Users) ===
+
+export interface VisitedUserListResponse {
+  count: number; // 总访问用户数
+  users?: VisitedUserInfo[]; // 用户列表（仅在 count_only 为 false 时返回）
+}
+
+export interface VisitedUserInfo {
+  phira_id: number;
+}
 ```
 
 针对 SSE（`GET /rooms/listen`）的事件定义：
@@ -96,8 +107,13 @@ export interface RecordData {
 ```typescript
 // === SSE 房间监听事件 (SSE) ===
 
-// 房间状态更新事件（可能全量也可能包含了某些特定字段修改）
-// 建立连接时立刻收到 `create_room` 代表初始化全量数据
+// 房间创建事件
+export interface SSEEventCreateRoom {
+  room: string;
+  data: RoomData;
+}
+
+// 房间状态更新事件
 export interface SSEEventUpdateRoom {
   room: string;
   data: Partial<RoomData>; // 数据更新（如果不存在，前台可理解为创建房间）
@@ -140,6 +156,15 @@ export interface SSEEventNewRound {
 
 **响应格式**：`application/json`，格式为 `RoomInfoResponse` (如果不在任何房间中则为 `null`)。
 
+#### `GET /visited`
+
+**说明**：获取曾经在本服务器上创建或加入过房间的用户信息。
+
+**查询参数**：
+- `count_only`: (可选, boolean) 是否仅返回总数量。默认为 `false`。
+
+**响应格式**：`application/json`，格式为 `VisitedUserListResponse`。
+
 #### `GET /rooms/listen`
 
 **说明**：用于监听房间生命周期事件的 Server-Sent Events (SSE) 流。
@@ -148,7 +173,8 @@ export interface SSEEventNewRound {
 
 包含的事件类型：
 
-- `update_room`: 发送 `SSEEventUpdateRoom` 结构的 JSON 数据。若房间 ID 不存在，那么代表创建新房间。当建立 SSE 连接时，服务端立刻发送若干 `update_room` 事件，表示当前所有房间的状态。
+- `create_room`: 发送 `SSEEventCreateRoom` 结构的 JSON 数据。当建立 SSE 连接时，服务端立刻发送若干 `create_room` 事件，表示当前所有房间的状态。
+- `update_room`: 发送 `SSEEventUpdateRoom` 结构的 JSON 数据。
 - `join_room`: 发送 `SSEEventJoinOrLeaveRoom` 结构的 JSON 数据。
 - `leave_room`: 发送 `SSEEventJoinOrLeaveRoom` 结构的 JSON 数据。
 - `new_round`: 发送 `SSEEventNewRound` 结构的 JSON 数据。
