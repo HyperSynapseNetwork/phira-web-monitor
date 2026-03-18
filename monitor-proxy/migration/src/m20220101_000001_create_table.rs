@@ -12,7 +12,6 @@ impl MigrationTrait for Migration {
                     .table(VisitedUsers::Table)
                     .if_not_exists()
                     .col(integer(VisitedUsers::PhiraId).primary_key())
-                    .col(string(VisitedUsers::Username))
                     .to_owned(),
             )
             .await
@@ -29,5 +28,4 @@ impl MigrationTrait for Migration {
 enum VisitedUsers {
     Table,
     PhiraId,
-    Username,
 }
