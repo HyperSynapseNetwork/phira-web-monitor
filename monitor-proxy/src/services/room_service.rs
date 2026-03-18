@@ -10,8 +10,7 @@ use axum::response::sse::Event;
 use futures::StreamExt;
 use log::warn;
 use phira_mp_common::{
-    generate_secret_key, ClientCommand, ClientRoomState, RoomData, RoomEvent, RoomId,
-    ServerCommand, UserInfo,
+    generate_secret_key, ClientCommand, ClientRoomState, RoomData, RoomId, ServerCommand, UserInfo,
 };
 use sea_orm::{sea_query::OnConflict, EntityTrait, PaginatorTrait};
 use serde_json::json;
@@ -56,21 +55,15 @@ impl MpClientState for RoomMonitorState {
                     .inspect_err(|e| warn!("error setting room result: {e}"));
             }
             ServerCommand::RoomEvent(event) => {
-                match &event {
-                    RoomEvent::CreateRoom { data, .. } if data.host != -1 => {
-                        self.cached_visited_user.write().await.insert(data.host);
-                    }
-                    RoomEvent::JoinRoom { user, .. } => {
-                        self.cached_visited_user.write().await.insert(*user);
-                    }
-                    _ => {}
-                }
                 let event_type = event.event_type();
                 let data_str = event.inner().to_string();
                 let _ = self
                     .push_event(Event::default().event(event_type).data(data_str))
                     .await
                     .inspect_err(|e| warn!("error sending {event_type} event: {e}"));
+            }
+            ServerCommand::UserVisit(id) => {
+                self.cached_visited_user.write().await.insert(id);
             }
             _ => {
                 warn!("unsupported command: {cmd:?}, ignoring");
