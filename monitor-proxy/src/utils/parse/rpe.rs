@@ -930,7 +930,7 @@ mod tests {
                 println!("Successfully parsed chart!");
                 println!("JudgeLines: {}", chart.lines.len());
                 println!("Offset: {}", chart.offset);
-                assert!(chart.lines.len() > 0);
+                assert!(!chart.lines.is_empty());
             }
             Err(e) => {
                 panic!("Failed to parse chart: {:?}", e);

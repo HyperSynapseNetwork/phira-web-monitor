@@ -96,39 +96,40 @@ impl ChartRenderer {
                 }
 
                 if let JudgeStatus::Hold(perfect, at, diff, pre_judge, up_time) = &note.judge
-                    && let NoteKind::Hold { end_time, .. } = &note.kind {
-                        if t >= *end_time {
-                            let j = if *perfect {
-                                Judgement::Perfect
-                            } else {
-                                Judgement::Good
-                            };
-                            events.push(JudgeEvent {
-                                kind: JudgeEventKind::HoldComplete(j),
-                                line_idx,
-                                note_idx,
-                            });
-                            note.judge = JudgeStatus::Judged(t, j);
-                        } else if t > *at {
-                            let j = if *perfect {
-                                Judgement::Perfect
-                            } else {
-                                Judgement::Good
-                            };
-                            note.judge = JudgeStatus::Hold(
-                                *perfect,
-                                *at + HOLD_PARTICLE_INTERVAL,
-                                *diff,
-                                *pre_judge,
-                                *up_time,
-                            );
-                            events.push(JudgeEvent {
-                                kind: JudgeEventKind::HoldTick(j),
-                                line_idx,
-                                note_idx,
-                            });
-                        }
+                    && let NoteKind::Hold { end_time, .. } = &note.kind
+                {
+                    if t >= *end_time {
+                        let j = if *perfect {
+                            Judgement::Perfect
+                        } else {
+                            Judgement::Good
+                        };
+                        events.push(JudgeEvent {
+                            kind: JudgeEventKind::HoldComplete(j),
+                            line_idx,
+                            note_idx,
+                        });
+                        note.judge = JudgeStatus::Judged(t, j);
+                    } else if t > *at {
+                        let j = if *perfect {
+                            Judgement::Perfect
+                        } else {
+                            Judgement::Good
+                        };
+                        note.judge = JudgeStatus::Hold(
+                            *perfect,
+                            *at + HOLD_PARTICLE_INTERVAL,
+                            *diff,
+                            *pre_judge,
+                            *up_time,
+                        );
+                        events.push(JudgeEvent {
+                            kind: JudgeEventKind::HoldTick(j),
+                            line_idx,
+                            note_idx,
+                        });
                     }
+                }
             }
         }
 

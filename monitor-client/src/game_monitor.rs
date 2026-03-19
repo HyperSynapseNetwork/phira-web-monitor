@@ -148,9 +148,10 @@ impl GameMonitor {
 
         // Immediately load chart if we already have it and scene doesn't have one
         if let (Some(info), Some(data)) = (&self.chart_info, &self.chart_data)
-            && !scene.has_chart() {
-                scene.load_chart(info.clone(), data.clone());
-            }
+            && !scene.has_chart()
+        {
+            scene.load_chart(info.clone(), data.clone());
+        }
 
         scene.attach_canvas(canvas_id)?;
         console_log!("GameMonitor: attached canvas for user {}", user_id);
@@ -232,10 +233,11 @@ impl GameMonitor {
                         room_state.as_ref().map(|s| format!("{:?}", s.state))
                     );
                     if let Some(state) = room_state
-                        && let RoomState::SelectChart(Some(id)) = state.state {
-                            self.selected_chart_id = Some(id);
-                            console_log!("GameMonitor: chart selected: {}", id);
-                        }
+                        && let RoomState::SelectChart(Some(id)) = state.state
+                    {
+                        self.selected_chart_id = Some(id);
+                        console_log!("GameMonitor: chart selected: {}", id);
+                    }
                 }
                 LiveEvent::Authenticate(Err(e)) => {
                     console_log!("GameMonitor: auth failed: {}", e);
@@ -273,33 +275,32 @@ impl GameMonitor {
                         self.start_all_scenes();
                     }
                     if matches!(state, RoomState::WaitingForReady)
-                        && let Some(id) = self.selected_chart_id {
-                            console_log!("GameMonitor: fetching chart {} internally...", id);
-                            let api_base = self.api_base.clone();
-                            let ws = self.ws.clone();
-                            let pending_chart = self.pending_chart.clone();
+                        && let Some(id) = self.selected_chart_id
+                    {
+                        console_log!("GameMonitor: fetching chart {} internally...", id);
+                        let api_base = self.api_base.clone();
+                        let ws = self.ws.clone();
+                        let pending_chart = self.pending_chart.clone();
 
-                            // Send custom binary command back to proxy...
-                            // Actually, we'll spawn a local task to fetch the chart
-                            // and then send the Ready command directly over WS.
-                            spawn_local(async move {
-                                if let Ok((info, chart)) =
-                                    fetch_and_parse_chart(&api_base, id).await
-                                {
-                                    console_log!(
-                                        "GameMonitor: chart {} loaded internally, sending Ready...",
-                                        id
-                                    );
-                                    *pending_chart.borrow_mut() = Some((info, chart));
+                        // Send custom binary command back to proxy...
+                        // Actually, we'll spawn a local task to fetch the chart
+                        // and then send the Ready command directly over WS.
+                        spawn_local(async move {
+                            if let Ok((info, chart)) = fetch_and_parse_chart(&api_base, id).await {
+                                console_log!(
+                                    "GameMonitor: chart {} loaded internally, sending Ready...",
+                                    id
+                                );
+                                *pending_chart.borrow_mut() = Some((info, chart));
 
-                                    let mut buf = Vec::new();
-                                    encode_packet(&WsCommand::Ready, &mut buf);
-                                    let _ = ws.send_with_u8_array(&buf);
-                                } else {
-                                    console_log!("GameMonitor: failed to load chart {}", id);
-                                }
-                            });
-                        }
+                                let mut buf = Vec::new();
+                                encode_packet(&WsCommand::Ready, &mut buf);
+                                let _ = ws.send_with_u8_array(&buf);
+                            } else {
+                                console_log!("GameMonitor: failed to load chart {}", id);
+                            }
+                        });
+                    }
                 }
                 LiveEvent::UserJoin(info) => {
                     console_log!(

@@ -180,9 +180,10 @@ impl ResourcePack {
             for ext in exts {
                 let filename = format!("{}.{}", name, ext);
                 if let Some(bytes) = files.get(&filename)
-                    && let Ok(clip) = AudioClip::load_from_bytes(bytes, ext) {
-                        return Some(clip);
-                    }
+                    && let Ok(clip) = AudioClip::load_from_bytes(bytes, ext)
+                {
+                    return Some(clip);
+                }
             }
             None
         }

@@ -103,9 +103,10 @@ impl ShaderManager {
         uniform: &str,
     ) -> Option<WebGlUniformLocation> {
         if let Some(name) = &self.current_program
-            && let Some(program) = self.programs.get(name) {
-                return ctx.gl.get_uniform_location(program, uniform);
-            }
+            && let Some(program) = self.programs.get(name)
+        {
+            return ctx.gl.get_uniform_location(program, uniform);
+        }
         None
     }
 }
