@@ -2908,6 +2908,7 @@ dependencies = [
 [[package]]
 name = "phira-mp-common"
 version = "0.1.0"
+source = "git+https://github.com/HyperSynapseNetwork/phira-mp#c1d4261867730a1f0e37a5aa5e20582d23cc5f13"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2929,6 +2930,7 @@ dependencies = [
 [[package]]
 name = "phira-mp-macros"
 version = "0.1.0"
+source = "git+https://github.com/HyperSynapseNetwork/phira-mp#c1d4261867730a1f0e37a5aa5e20582d23cc5f13"
 dependencies = [
  "proc-macro2",
  "quote",

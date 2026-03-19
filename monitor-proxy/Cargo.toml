@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-phira-mp-common = { path = "../../phira-mp/phira-mp-common" }
+phira-mp-common = { git = "https://github.com/HyperSynapseNetwork/phira-mp" }
 monitor-common = { path = "../monitor-common" }
 migration = { path = "./migration" }
 
