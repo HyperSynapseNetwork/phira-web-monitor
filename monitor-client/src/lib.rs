@@ -1,7 +1,7 @@
 use wasm_bindgen::prelude::*;
 
 mod audio;
-mod chart_player;
+pub mod chart_player;
 mod engine;
 pub mod game_monitor;
 mod renderer;
@@ -16,5 +16,5 @@ extern "C" {
 
 #[macro_export]
 macro_rules! console_log {
-    ($($t:tt)*) => (crate::log(&format_args!($($t)*).to_string()))
+    ($($t:tt)*) => ($crate::log(&format_args!($($t)*).to_string()))
 }

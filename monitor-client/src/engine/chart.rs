@@ -95,8 +95,8 @@ impl ChartRenderer {
                     continue;
                 }
 
-                if let JudgeStatus::Hold(perfect, at, diff, pre_judge, up_time) = &note.judge {
-                    if let NoteKind::Hold { end_time, .. } = &note.kind {
+                if let JudgeStatus::Hold(perfect, at, diff, pre_judge, up_time) = &note.judge
+                    && let NoteKind::Hold { end_time, .. } = &note.kind {
                         if t >= *end_time {
                             let j = if *perfect {
                                 Judgement::Perfect
@@ -129,7 +129,6 @@ impl ChartRenderer {
                             });
                         }
                     }
-                }
             }
         }
 

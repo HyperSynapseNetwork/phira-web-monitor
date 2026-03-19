@@ -79,10 +79,10 @@ impl Batcher {
         let mut indices = Vec::with_capacity(MAX_QUADS * INDICES_PER_QUAD);
         for i in 0..MAX_QUADS {
             let base = (i * 4) as u16;
-            indices.push(base + 0);
+            indices.push(base);
             indices.push(base + 1);
             indices.push(base + 2);
-            indices.push(base + 0);
+            indices.push(base);
             indices.push(base + 2);
             indices.push(base + 3);
         }
@@ -120,6 +120,7 @@ impl Batcher {
         self.active_texture_id = None;
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_rect(
         &mut self,
         ctx: &GlContext,
@@ -154,6 +155,7 @@ impl Batcher {
         self.index_count += INDICES_PER_QUAD as i32;
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_texture_rect(
         &mut self,
         ctx: &GlContext,

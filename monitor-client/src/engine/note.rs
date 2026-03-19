@@ -1,5 +1,7 @@
-use crate::engine::resource::Resource;
-use crate::renderer::{Renderer, Texture};
+use crate::{
+    engine::resource::{Rect, Resource},
+    renderer::{Renderer, Texture},
+};
 use monitor_common::core::{JudgeLine, JudgeStatus, Note, NoteKind};
 use nalgebra::{Matrix3, Vector2};
 
@@ -146,13 +148,14 @@ fn draw_simple_note(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_hold_note(
     res: &mut Resource,
     note: &Note,
     texture: Texture,
-    head_rect: crate::engine::resource::Rect,
-    body_rect: crate::engine::resource::Rect,
-    tail_rect: crate::engine::resource::Rect,
+    head_rect: Rect,
+    body_rect: Rect,
+    tail_rect: Rect,
     scale: f32,
     config: &RenderConfig,
     renderer: &mut Renderer,
@@ -202,7 +205,7 @@ fn draw_hold_note(
         // y: bottom position of the part
         // h: height of the part
         // r: source rect (u, v, w, h)
-        let mut draw_part = |y: f32, h: f32, r: crate::engine::resource::Rect| {
+        let mut draw_part = |y: f32, h: f32, r: Rect| {
             if h <= 0.0001 {
                 return;
             }
@@ -251,7 +254,7 @@ fn draw_hold_note(
         let head_y = clamped_head_y;
         let tail_y = raw_tail_y;
 
-        let is_compact = res.res_pack.as_ref().map_or(false, |p| p.info.hold_compact);
+        let is_compact = res.res_pack.as_ref().is_some_and(|p| p.info.hold_compact);
 
         let draw_head_y = head_y - if is_compact { head_h / 2.0 } else { head_h };
         let draw_tail_y = tail_y - if is_compact { tail_h / 2.0 } else { 0.0 };

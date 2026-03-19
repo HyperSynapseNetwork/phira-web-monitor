@@ -12,10 +12,14 @@ use std::collections::HashMap;
 // Note types
 // ============================================================================
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub enum NoteKind {
+    #[default]
     Click,
-    Hold { end_time: f32, end_height: f32 },
+    Hold {
+        end_time: f32,
+        end_height: f32,
+    },
     Flick,
     Drag,
 }
@@ -33,12 +37,6 @@ impl NoteKind {
 
     pub fn is_hold(&self) -> bool {
         matches!(self, Self::Hold { .. })
-    }
-}
-
-impl Default for NoteKind {
-    fn default() -> Self {
-        Self::Click
     }
 }
 

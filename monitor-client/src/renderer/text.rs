@@ -73,6 +73,7 @@ impl SpriteFont {
             .sum()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_text_color(
         &self,
         renderer: &mut Renderer,
@@ -115,6 +116,7 @@ impl SpriteFont {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_text(
         &self,
         renderer: &mut Renderer,

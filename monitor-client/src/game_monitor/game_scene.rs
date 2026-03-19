@@ -148,17 +148,17 @@ impl GameScene {
         self.sync_audio();
 
         // If already started, seek to tracked game time so rendering picks up mid-game
-        if self.start_wall_time.is_some() {
-            if let Some(target) = self.target_time {
-                let seek_pos = (target - SEEK_OFFSET).max(0.0);
-                self.time.seek_to(seek_pos as f64);
-                console_log!(
-                    "GameScene[{}]: mid-game attach, seeking to {:.3}s (target={:.3})",
-                    self.user_id,
-                    seek_pos,
-                    target
-                );
-            }
+        if self.start_wall_time.is_some()
+            && let Some(target) = self.target_time
+        {
+            let seek_pos = (target - SEEK_OFFSET).max(0.0);
+            self.time.seek_to(seek_pos as f64);
+            console_log!(
+                "GameScene[{}]: mid-game attach, seeking to {:.3}s (target={:.3})",
+                self.user_id,
+                seek_pos,
+                target
+            );
         }
 
         console_log!("GameScene[{}]: canvas attached", self.user_id);
@@ -348,7 +348,7 @@ impl GameScene {
                     let seek_pos = (target - SEEK_OFFSET).max(0.0);
                     self.time.seek_to(seek_pos as f64);
                     self.time.resume();
-                    let _ = ctx.audio_engine.play(seek_pos.into());
+                    let _ = ctx.audio_engine.play(seek_pos);
                 } else {
                     self.time.resume();
                     let _ = ctx.audio_engine.play(0.0);
@@ -359,25 +359,25 @@ impl GameScene {
         }
 
         // Rule 2 & 3: Strict Pause & Resume with Delta
-        if let Some(_ev_time) = self.unpause_signal.take() {
-            if let Some(paused_time) = self.judge_pause_time.take() {
-                let resume_time = (paused_time - 1.000).max(0.0);
-                self.time.seek_to(resume_time as f64);
-                self.time.resume();
+        if let Some(_ev_time) = self.unpause_signal.take()
+            && let Some(paused_time) = self.judge_pause_time.take()
+        {
+            let resume_time = (paused_time - 1.000).max(0.0);
+            self.time.seek_to(resume_time as f64);
+            self.time.resume();
 
-                if let Some(cr) = &mut self.chart_renderer {
-                    cr.clear_stale_notes(resume_time);
-                }
-
-                let _ = ctx.audio_engine.play(resume_time.into());
-
-                console_log!(
-                    "GameMonitor: GameScene[{}]: resuming from {:.3} (paused at: {:.3})",
-                    self.user_id,
-                    resume_time,
-                    paused_time
-                );
+            if let Some(cr) = &mut self.chart_renderer {
+                cr.clear_stale_notes(resume_time);
             }
+
+            let _ = ctx.audio_engine.play(resume_time);
+
+            console_log!(
+                "GameMonitor: GameScene[{}]: resuming from {:.3} (paused at: {:.3})",
+                self.user_id,
+                resume_time,
+                paused_time
+            );
         }
 
         let current_time = self.judge_pause_time.unwrap_or_else(|| self.time.now());
@@ -461,10 +461,10 @@ impl GameScene {
             // Play hitsounds
             for event in &all_events {
                 match &event.kind {
-                    JudgeEventKind::Judged(j) if matches!(j, Judgement::Miss | Judgement::Bad) => {}
+                    JudgeEventKind::Judged(Judgement::Miss | Judgement::Bad) => {}
                     JudgeEventKind::Judged(_) | JudgeEventKind::HoldStart => {
                         let note = &cr.chart.lines[event.line_idx].notes[event.note_idx];
-                        let hitsound = note.hitsound.clone().unwrap_or_else(|| match note.kind {
+                        let hitsound = note.hitsound.clone().unwrap_or(match note.kind {
                             NoteKind::Click | NoteKind::Hold { .. } => HitSound::Click,
                             NoteKind::Drag => HitSound::Drag,
                             NoteKind::Flick => HitSound::Flick,
@@ -590,10 +590,10 @@ impl GameScene {
 
         // Remove fully faded touches
         self.fading_touches.retain(|touch| {
-            if let Some(end) = touch.end_time {
-                if t > end + TOUCH_FADE_TIME {
-                    return false;
-                }
+            if let Some(end) = touch.end_time
+                && t > end + TOUCH_FADE_TIME
+            {
+                return false;
             }
             true
         });

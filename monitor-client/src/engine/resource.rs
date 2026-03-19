@@ -43,6 +43,7 @@ fn default_tinted() -> bool {
     true
 }
 
+#[allow(unused)]
 pub struct NoteStyle {
     pub click: Texture,
     pub hold: Texture,
@@ -90,6 +91,7 @@ impl NoteStyle {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(unused)]
 pub struct ResPackInfo {
     pub name: String,
     pub author: String,
@@ -167,9 +169,9 @@ impl ResourcePack {
             let bytes = files
                 .get(name)
                 .ok_or_else(|| anyhow::anyhow!("Missing {}", name))?;
-            Ok(Texture::load_from_bytes(ctx, bytes)
+            Texture::load_from_bytes(ctx, bytes)
                 .await
-                .map_err(|e| anyhow::anyhow!("Failed to load texture {}: {:?}", name, e))?)
+                .map_err(|e| anyhow::anyhow!("Failed to load texture {}: {:?}", name, e))
         }
 
         // Helper to load audio from bytes
@@ -177,11 +179,10 @@ impl ResourcePack {
             let exts = ["mp3", "ogg", "wav"];
             for ext in exts {
                 let filename = format!("{}.{}", name, ext);
-                if let Some(bytes) = files.get(&filename) {
-                    if let Ok(clip) = AudioClip::load_from_bytes(bytes, ext) {
+                if let Some(bytes) = files.get(&filename)
+                    && let Ok(clip) = AudioClip::load_from_bytes(bytes, ext) {
                         return Some(clip);
                     }
-                }
             }
             None
         }
@@ -455,12 +456,12 @@ impl Resource {
         Ok(())
     }
 
-    pub fn set_scale(&mut self, scale: f32) {
-        self.note_scale = scale;
-        if let Some(emitter) = &mut self.emitter {
-            emitter.set_scale(scale);
-        }
-    }
+    // pub fn set_scale(&mut self, scale: f32) {
+    //     self.note_scale = scale;
+    //     if let Some(emitter) = &mut self.emitter {
+    //         emitter.set_scale(scale);
+    //     }
+    // }
 
     pub fn push_model(&mut self, transform: Matrix) {
         let current = *self.model_stack.last().unwrap();
@@ -477,9 +478,9 @@ impl Resource {
         *self.model_stack.last().unwrap()
     }
 
-    pub fn transform_point(&self, p: Point) -> Point {
-        self.model_stack.last().unwrap().transform_point(&p)
-    }
+    // pub fn transform_point(&self, p: Point) -> Point {
+    //     self.model_stack.last().unwrap().transform_point(&p)
+    // }
 
     pub fn get_gl_matrix(&self) -> [f32; 16] {
         let m = self.model_stack.last().unwrap();

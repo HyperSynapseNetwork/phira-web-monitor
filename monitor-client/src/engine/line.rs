@@ -12,7 +12,7 @@ pub fn draw_line(
     world_matrix: Matrix,
 ) {
     // TODO: support attach_ui
-    if let Some(_) = &line.attach_ui {
+    if line.attach_ui.is_some() {
         return;
     }
     res.with_model(world_matrix, |res| {
@@ -164,7 +164,7 @@ pub fn draw_line(
             line_height: height_val,
             aspect_ratio: res.aspect_ratio,
             note_width: res.note_width * res.note_scale,
-            draw_below: draw_below,
+            draw_below,
             alpha: line.ctrl_obj.alpha.now_opt().unwrap_or(1.0),
         };
 

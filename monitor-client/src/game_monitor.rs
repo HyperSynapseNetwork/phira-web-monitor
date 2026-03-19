@@ -147,11 +147,10 @@ impl GameMonitor {
         let scene = self.scenes.get_mut(&user_id).unwrap();
 
         // Immediately load chart if we already have it and scene doesn't have one
-        if let (Some(info), Some(data)) = (&self.chart_info, &self.chart_data) {
-            if !scene.has_chart() {
+        if let (Some(info), Some(data)) = (&self.chart_info, &self.chart_data)
+            && !scene.has_chart() {
                 scene.load_chart(info.clone(), data.clone());
             }
-        }
 
         scene.attach_canvas(canvas_id)?;
         console_log!("GameMonitor: attached canvas for user {}", user_id);
@@ -232,12 +231,11 @@ impl GameMonitor {
                         info.id,
                         room_state.as_ref().map(|s| format!("{:?}", s.state))
                     );
-                    if let Some(state) = room_state {
-                        if let RoomState::SelectChart(Some(id)) = state.state {
+                    if let Some(state) = room_state
+                        && let RoomState::SelectChart(Some(id)) = state.state {
                             self.selected_chart_id = Some(id);
                             console_log!("GameMonitor: chart selected: {}", id);
                         }
-                    }
                 }
                 LiveEvent::Authenticate(Err(e)) => {
                     console_log!("GameMonitor: auth failed: {}", e);
@@ -274,8 +272,8 @@ impl GameMonitor {
                     if matches!(state, RoomState::Playing) {
                         self.start_all_scenes();
                     }
-                    if matches!(state, RoomState::WaitingForReady) {
-                        if let Some(id) = self.selected_chart_id {
+                    if matches!(state, RoomState::WaitingForReady)
+                        && let Some(id) = self.selected_chart_id {
                             console_log!("GameMonitor: fetching chart {} internally...", id);
                             let api_base = self.api_base.clone();
                             let ws = self.ws.clone();
@@ -302,7 +300,6 @@ impl GameMonitor {
                                 }
                             });
                         }
-                    }
                 }
                 LiveEvent::UserJoin(info) => {
                     console_log!(

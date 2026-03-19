@@ -96,6 +96,7 @@ impl Renderer {
         self.batcher.set_texture(&self.context, texture);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_rect(
         &mut self,
         x: f32,
@@ -113,6 +114,7 @@ impl Renderer {
             .draw_rect(&self.context, x, y, w, h, r, g, b, a, model);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_circle(
         &mut self,
         x: f32,
@@ -162,6 +164,7 @@ impl Renderer {
         self.shader_manager.use_program(&self.context, "default");
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_texture_rect(
         &mut self,
         x: f32,

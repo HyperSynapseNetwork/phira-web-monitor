@@ -1,7 +1,7 @@
 use monitor_common::core::{AudioClip, HitSound};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
-use web_sys::{AudioBuffer, AudioBufferSourceNode, AudioContext};
+use web_sys::{AudioBuffer, AudioBufferSourceNode, AudioContext, AudioScheduledSourceNode};
 
 pub struct AudioEngine {
     ctx: AudioContext,
@@ -41,7 +41,7 @@ impl AudioEngine {
             buffer.copy_to_channel(&channel_data, channel as i32)?;
         }
 
-        self.music_buffer = Some(buffer);
+        self.set_music_buffer(buffer);
         Ok(())
     }
 
@@ -61,7 +61,7 @@ impl AudioEngine {
             buffer.copy_to_channel(&channel_data, channel as i32)?;
         }
 
-        self.hitsound_buffers.insert(kind, buffer);
+        self.set_hitsound_buffer(kind, buffer);
         Ok(())
     }
 
@@ -93,7 +93,8 @@ impl AudioEngine {
 
     pub fn pause(&mut self) -> Result<(), JsValue> {
         if let Some(source) = self.music_source.take() {
-            let _ = source.stop_with_when(0.0);
+            let scheduled: &AudioScheduledSourceNode = source.as_ref();
+            let _ = scheduled.stop();
         }
         Ok(())
     }

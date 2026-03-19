@@ -162,11 +162,11 @@ impl ChartPlayer {
         // Consume events: play hitsounds
         for event in &events {
             match &event.kind {
-                JudgeEventKind::Judged(j) if matches!(j, Judgement::Miss | Judgement::Bad) => {}
+                JudgeEventKind::Judged(Judgement::Miss | Judgement::Bad) => {}
                 JudgeEventKind::Judged(_) | JudgeEventKind::HoldStart => {
                     let note =
                         &self.chart_renderer.chart.lines[event.line_idx].notes[event.note_idx];
-                    let hitsound = note.hitsound.clone().unwrap_or_else(|| match note.kind {
+                    let hitsound = note.hitsound.clone().unwrap_or(match note.kind {
                         NoteKind::Click => HitSound::Click,
                         NoteKind::Drag => HitSound::Drag,
                         NoteKind::Flick => HitSound::Flick,
@@ -254,12 +254,12 @@ impl ChartPlayer {
         let mut resource = Resource::new(w, h);
         resource.load_defaults(&renderer.context)?;
 
-        if let Some(pack) = existing_pack {
-            if pack.info.name != "fallback" {
-                resource
-                    .set_pack(&renderer.context, pack)
-                    .map_err(|e| JsValue::from_str(&format!("Failed to restore pack: {}", e)))?;
-            }
+        if let Some(pack) = existing_pack
+            && pack.info.name != "fallback"
+        {
+            resource
+                .set_pack(&renderer.context, pack)
+                .map_err(|e| JsValue::from_str(&format!("Failed to restore pack: {}", e)))?;
         }
 
         for (i, line) in chart.lines.iter().enumerate() {

@@ -5,6 +5,7 @@ use nalgebra::Vector2;
 use web_sys::{WebGl2RenderingContext, WebGlBuffer, WebGlProgram, WebGlVertexArrayObject};
 
 #[derive(Clone, Copy, Debug)]
+#[allow(unused)]
 pub enum EmissionShape {
     Point,
     Rect { width: f32, height: f32 },
@@ -66,6 +67,7 @@ impl AtlasConfig {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[allow(unused)]
 pub enum BlendMode {
     Alpha,
     Add,
@@ -434,11 +436,11 @@ impl Emitter {
     }
 
     // Add set_mvp helper?
-    pub fn set_mvp(&self, gl: &WebGl2RenderingContext, mvp: &[f32]) {
-        gl.use_program(Some(&self.program));
-        let u_mvp = gl.get_uniform_location(&self.program, "u_mvp");
-        gl.uniform_matrix4fv_with_f32_array(u_mvp.as_ref(), false, mvp);
-    }
+    // pub fn set_mvp(&self, gl: &WebGl2RenderingContext, mvp: &[f32]) {
+    //     gl.use_program(Some(&self.program));
+    //     let u_mvp = gl.get_uniform_location(&self.program, "u_mvp");
+    //     gl.uniform_matrix4fv_with_f32_array(u_mvp.as_ref(), false, mvp);
+    // }
 
     pub fn emit(&mut self, pos: Vector2<f32>, n: usize) {
         for _ in 0..n {

@@ -10,6 +10,12 @@ pub struct TimeManager {
     pause_time: Option<f64>,
 }
 
+impl Default for TimeManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TimeManager {
     pub fn new() -> Self {
         Self {
