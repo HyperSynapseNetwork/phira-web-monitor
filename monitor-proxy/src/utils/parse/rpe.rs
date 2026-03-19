@@ -904,17 +904,7 @@ mod tests {
     #[tokio::test]
     async fn test_parse_real_chart() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        // Need to go up to workspace root then to phira
-        // monitor-common is in monitor-common/
-        // phira is in ../phira/
-        // So ../../phira/ should work if we are in monitor-common/src/parse/
-        // But CARGO_MANIFEST_DIR is .../monitor-common
-        let chart_path = manifest_dir
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("phira/target/release/data/charts/download/36238/4763292798521731.json");
+        let chart_path = manifest_dir.join("test_data/test_chart.json");
 
         println!("Loading chart from: {:?}", chart_path);
         let json = std::fs::read_to_string(&chart_path).expect("Failed to read chart file");
