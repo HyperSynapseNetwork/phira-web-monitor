@@ -7,11 +7,14 @@
 
 use clap::Parser;
 use log::{error, info};
+use migration::{Migrator, MigratorTrait};
 use reqwest::Client;
+use sea_orm::{Database, DatabaseConnection};
 use std::{net::SocketAddr, ops::Deref, sync::Arc};
 
 mod config;
 mod dtos;
+mod entity;
 mod error;
 mod handlers;
 mod middlewares;
@@ -21,6 +24,7 @@ mod utils;
 
 pub struct AppStateInner {
     pub config: config::Config,
+    pub db: DatabaseConnection,
     pub http_client: Client,
     pub auth_service: services::AuthService,
     pub chart_service: services::ChartService,
@@ -33,6 +37,16 @@ pub struct AppState(Arc<AppStateInner>);
 
 impl AppState {
     pub async fn new(config: config::Config) -> Self {
+        let db = Database::connect(&config.database_url)
+            .await
+            .expect("Failed to connect to database");
+
+        Migrator::up(&db, None)
+            .await
+            .expect("Failed to run database migrations");
+
+        info!("Database connected and migrations applied.");
+
         let room_service = services::RoomService::new(&config.mp_server)
             .await
             .inspect_err(|e| error!("failed to setup RoomService: {e}"))
@@ -40,6 +54,7 @@ impl AppState {
 
         Self(Arc::new(AppStateInner {
             config,
+            db,
             http_client: Client::new(),
             auth_service: services::AuthService::new(),
             chart_service: services::ChartService::new(),
@@ -66,7 +81,6 @@ async fn main() -> anyhow::Result<()> {
     info!("Cache Dir: {:?}", config.cache_dir);
 
     let state = AppState::new(config).await;
-
     let addr = SocketAddr::new(state.config.host, state.config.port);
     let app = router::init_router(state);
 

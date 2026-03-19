@@ -155,9 +155,7 @@ impl<T: Tweenable> Anim<T> {
     }
 
     pub fn now_opt(&self) -> Option<T> {
-        let Some(now) = self.now_opt_inner() else {
-            return None;
-        };
+        let now = self.now_opt_inner()?;
         Some(if let Some(next) = &self.next {
             T::add(&now, &next.now_opt().unwrap())
         } else {

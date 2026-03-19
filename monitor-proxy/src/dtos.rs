@@ -3,3 +3,6 @@ pub use auth_dto::*;
 
 pub mod room_dto;
 pub use room_dto::*;
+
+pub mod visited_dto;
+pub use visited_dto::*;

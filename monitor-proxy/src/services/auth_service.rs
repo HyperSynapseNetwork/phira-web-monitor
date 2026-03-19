@@ -88,3 +88,9 @@ impl AuthService {
         })
     }
 }
+
+impl Default for AuthService {
+    fn default() -> Self {
+        Self::new()
+    }
+}

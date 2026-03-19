@@ -54,7 +54,7 @@ impl IntoResponse for AppError {
         let error_msg = if let Some(e) = self.inner {
             format!("{}: {:#?}", self.message, e)
         } else {
-            format!("{}", self.message)
+            self.message.to_string()
         };
         error!(
             "Failed to process response ({} {}): {}",
@@ -77,7 +77,7 @@ where
     fn from(err: E) -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: format!("internal server error"),
+            message: "internal server error".to_string(),
             inner: Some(err.into()),
         }
     }
@@ -92,7 +92,7 @@ where
         M: Display + ?Sized,
     {
         self.map_err(|e| AppError {
-            status: status,
+            status,
             message: message.to_string(),
             inner: Some(e.into()),
         })
@@ -105,7 +105,7 @@ impl<T> AppErrorExt<T> for std::option::Option<T> {
         M: Display + ?Sized,
     {
         self.ok_or_else(|| AppError {
-            status: status,
+            status,
             message: message.to_string(),
             inner: None,
         })

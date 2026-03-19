@@ -185,7 +185,7 @@ fn read_judge_line(r: &mut BinaryReader<impl Read>) -> Result<JudgeLine> {
     let object = Object::read_binary(r)?;
     let kind = match r.read_u8()? {
         0 => JudgeLineKind::Normal,
-        1 => JudgeLineKind::Texture(Texture::empty().into(), r.read_string()?),
+        1 => JudgeLineKind::Texture(Texture::empty(), r.read_string()?),
         2 => JudgeLineKind::Text(*read_anim::<String>(r)?.unwrap_or_default()),
         3 => JudgeLineKind::Paint(*read_anim::<f32>(r)?.unwrap_or_default()),
         _ => bail!("invalid judge line kind"),
@@ -249,7 +249,7 @@ fn read_judge_line(r: &mut BinaryReader<impl Read>) -> Result<JudgeLine> {
 pub async fn parse_pbc(source: &[u8]) -> Result<Chart> {
     let mut r = BinaryReader::new(source);
     let offset = r.read_f32()?;
-    let mut lines = r.read_array(|r| read_judge_line(r))?;
+    let mut lines = r.read_array(read_judge_line)?;
     process_lines(&mut lines);
     let mut chart = Chart::new(offset, lines, BpmList::default());
     chart.settings = ChartSettings {

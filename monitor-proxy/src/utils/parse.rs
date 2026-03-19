@@ -22,7 +22,7 @@ pub trait ResourceLoader: Send + Sync {
 use monitor_common::core::{easing_from, JudgeLine, TweenId, TweenMajor, TweenMinor};
 use std::cmp::Ordering;
 
-pub(self) fn process_lines(v: &mut [JudgeLine]) {
+fn process_lines(v: &mut [JudgeLine]) {
     let mut times = Vec::new();
     // TODO optimize using k-merge sort
     let sorts = v
@@ -142,7 +142,7 @@ pub async fn load_chart(fs: &mut dyn ResourceLoader) -> Result<(ChartInfo, Chart
                 log::info!("Detected PGR chart");
                 Some(ChartFormat::Pgr)
             }
-        } else if chart_bytes.first().map_or(false, |b| b.is_ascii()) {
+        } else if chart_bytes.first().is_some_and(|b| b.is_ascii()) {
             log::info!("Detected PEC chart");
             Some(ChartFormat::Pec)
         } else {

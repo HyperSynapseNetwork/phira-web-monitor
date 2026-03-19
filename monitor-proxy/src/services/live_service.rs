@@ -33,7 +33,7 @@ impl GameMonitorState {
             join_result: TaskResult::new(),
             leave_result: TaskResult::new(),
 
-            event_tx: event_tx,
+            event_tx,
             selected_chart: AtomicI32::new(-1),
         }
     }
@@ -155,7 +155,7 @@ impl GameMonitorClient {
     pub async fn leave_room(&self) -> anyhow::Result<SResult<()>> {
         let res = self
             .leave_result
-            .acquire(|| async move { self.send(ClientCommand::LeaveRoom).await })
+            .acquire(|| self.send(ClientCommand::LeaveRoom))
             .await?;
         let _ = self.event_tx.send(LiveEvent::Leave(res.clone()));
         Ok(res)
@@ -189,5 +189,11 @@ impl LiveService {
         let token = session.token.as_str();
         let (tx, rx) = mpsc::unbounded_channel();
         Ok((rx, GameMonitorClient::new(mp_server, token, tx).await?))
+    }
+}
+
+impl Default for LiveService {
+    fn default() -> Self {
+        Self::new()
     }
 }
