@@ -1,10 +1,17 @@
-use crate::console_log;
-use crate::engine::judge::{JudgeEvent, JudgeEventKind};
-use crate::engine::{Resource, draw_line};
-use crate::renderer::Renderer;
-use monitor_common::core::{Chart, ChartInfo, JudgeStatus, Judgement, Matrix, NoteKind, Vector};
+use crate::{
+    console_log,
+    engine::{
+        Resource, draw_line,
+        judge::{JudgeEvent, JudgeEventKind},
+    },
+    renderer::{GlContext, Renderer, Texture},
+};
+use monitor_common::core::{
+    Chart, ChartInfo, JudgeLineKind, JudgeStatus, Judgement, Matrix, NoteKind, Vector,
+};
 use nalgebra::{Matrix3, Rotation2};
 use std::f32::consts::PI;
+use wasm_bindgen::prelude::*;
 
 const HOLD_PARTICLE_INTERVAL: f32 = 0.15;
 
@@ -226,5 +233,38 @@ impl ChartRenderer {
                 res.emit_at_origin(rotation, color);
             });
         }
+    }
+
+    /// Load custom judge line textures (Texture / TextureGif) from chart data
+    /// into the Resource's GPU texture maps.
+    pub async fn load_line_textures(
+        &self,
+        ctx: &GlContext,
+        res: &mut Resource,
+    ) -> Result<(), JsValue> {
+        res.line_textures.clear();
+        res.line_gif_textures.clear();
+
+        for (i, line) in self.chart.lines.iter().enumerate() {
+            match &line.kind {
+                JudgeLineKind::Texture(tex, _) => {
+                    if let Ok(texture) = Texture::load_from_bytes(ctx, tex.data()).await {
+                        res.line_textures.insert(i, texture);
+                    }
+                }
+                JudgeLineKind::TextureGif(_, frames, _) => {
+                    let mut gl_frames = Vec::new();
+                    for (_time, tex) in &frames.frames {
+                        if let Ok(texture) = Texture::load_from_bytes(ctx, tex.data()).await {
+                            gl_frames.push(texture);
+                        }
+                    }
+                    res.line_gif_textures.insert(i, gl_frames);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
     }
 }

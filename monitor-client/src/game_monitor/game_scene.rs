@@ -1,19 +1,45 @@
 //! Per-player rendering context for live monitoring.
 
-use std::collections::{HashMap, VecDeque};
-
 use crate::{
     audio::AudioEngine,
     console_log,
-    engine::{ChartRenderer, JudgeEventKind, Resource},
+    engine::{ChartRenderer, JudgeEvent, JudgeEventKind, Resource},
     renderer::Renderer,
     time::TimeManager,
 };
 use monitor_common::core::{
     AnimVector, Chart, ChartInfo, HitSound, JudgeStatus, Judgement, Keyframe, NoteKind,
 };
-use phira_mp_common::{JudgeEvent, TouchFrame};
+use phira_mp_common::{JudgeEvent as MpJudgeEvent, Judgement as MpJudgement, TouchFrame};
+use std::{
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap},
+};
 use wasm_bindgen::prelude::*;
+
+// ── OrdJudgeEvent: Ord wrapper for f32-keyed JudgeEvent ─────────────────────
+
+/// Newtype so we can implement `Ord` (by `time`) for use in `BinaryHeap`.
+#[derive(Clone, Debug)]
+struct OrdJudgeEvent(MpJudgeEvent);
+
+impl PartialEq for OrdJudgeEvent {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.time.total_cmp(&other.0.time).is_eq()
+    }
+}
+impl Eq for OrdJudgeEvent {}
+
+impl PartialOrd for OrdJudgeEvent {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for OrdJudgeEvent {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.time.total_cmp(&other.0.time)
+    }
+}
 
 // ── Touch overlay constants ─────────────────────────────────────────────────
 
@@ -71,8 +97,10 @@ pub struct GameScene {
     // Wall-clock time (ms, from performance.now()) when start() was called
     start_wall_time: Option<f64>,
 
-    // MP event buffers
-    pending_judges: VecDeque<phira_mp_common::JudgeEvent>,
+    // MP event buffers (min-heap by time to handle out-of-order arrivals)
+    pending_judges: BinaryHeap<Reverse<OrdJudgeEvent>>,
+    /// Whether line textures need to be loaded (set when chart loaded while canvas exists)
+    needs_texture_load: bool,
     /// Currently pressed touches, keyed by finger_id
     active_touches: HashMap<i8, ActiveTouch>,
     /// Touches that have been released and are fading out
@@ -94,7 +122,8 @@ impl GameScene {
             target_time: None,
             unpause_signal: None,
             start_wall_time: None,
-            pending_judges: VecDeque::new(),
+            pending_judges: BinaryHeap::new(),
+            needs_texture_load: false,
             active_touches: HashMap::new(),
             fading_touches: Vec::new(),
         }
@@ -128,7 +157,7 @@ impl GameScene {
 
     /// Attach a `<canvas>` element to this scene, initializing WebGL and Audio.
     /// If already attached, this is a no-op.
-    pub fn attach_canvas(&mut self, canvas_id: &str) -> Result<(), JsValue> {
+    pub async fn attach_canvas(&mut self, canvas_id: &str) -> Result<(), JsValue> {
         if self.render_ctx.is_some() {
             return Ok(());
         }
@@ -144,8 +173,9 @@ impl GameScene {
             audio_engine,
         });
 
-        // If chart is already loaded, sync audio
+        // If chart is already loaded, sync audio and load line textures
         self.sync_audio();
+        self.load_line_textures().await;
 
         // If already started, seek to tracked game time so rendering picks up mid-game
         if self.start_wall_time.is_some()
@@ -195,8 +225,14 @@ impl GameScene {
         // Pause audio and sync with the new chart
         if let Some(ctx) = &mut self.render_ctx {
             let _ = ctx.audio_engine.pause();
+            // Clear stale line textures from previous chart
+            ctx.resource.line_textures.clear();
+            ctx.resource.line_gif_textures.clear();
         }
         self.sync_audio();
+
+        // Mark that line textures need loading (will be picked up by GameMonitor)
+        self.needs_texture_load = true;
 
         console_log!("GameScene[{}]: chart loaded", self.user_id);
     }
@@ -206,6 +242,32 @@ impl GameScene {
         self.chart_renderer = None;
         self.reset_state();
         console_log!("GameScene[{}]: cleared", self.user_id);
+    }
+
+    /// Load custom judge line textures (Texture / TextureGif) from the current chart
+    /// into the scene's WebGL resource maps.
+    pub async fn load_line_textures(&mut self) {
+        let (Some(cr), Some(ctx)) = (&self.chart_renderer, &mut self.render_ctx) else {
+            return;
+        };
+
+        self.needs_texture_load = false;
+
+        let _ = cr
+            .load_line_textures(&ctx.renderer.context, &mut ctx.resource)
+            .await;
+
+        console_log!(
+            "GameScene[{}]: loaded {} line textures, {} gif textures",
+            self.user_id,
+            ctx.resource.line_textures.len(),
+            ctx.resource.line_gif_textures.len()
+        );
+    }
+
+    /// Whether line textures need to be (re-)loaded.
+    pub fn needs_texture_load(&self) -> bool {
+        self.needs_texture_load && self.render_ctx.is_some() && self.chart_renderer.is_some()
     }
 
     /// Load default texture resources into the scene's WebGL context.
@@ -266,8 +328,9 @@ impl GameScene {
         }
     }
 
-    pub fn push_judges(&mut self, judges: &[JudgeEvent]) {
-        self.pending_judges.extend(judges.iter().cloned());
+    pub fn push_judges(&mut self, judges: &[MpJudgeEvent]) {
+        self.pending_judges
+            .extend(judges.iter().cloned().map(|e| Reverse(OrdJudgeEvent(e))));
         if let Some(last) = judges.last() {
             self.unpause_signal = Some(last.time);
             self.target_time = Some(self.target_time.unwrap_or(last.time).max(last.time));
@@ -403,22 +466,20 @@ impl GameScene {
             let pending_judges = &mut self.pending_judges;
             let all_events = cr.update_judges(&ctx.resource, |chart, t| {
                 let mut hook_events = Vec::new();
-                while let Some(ev) = pending_judges.front() {
-                    if ev.time > t {
+                while let Some(Reverse(ev_wrapper)) = pending_judges.peek() {
+                    if ev_wrapper.0.time > t {
                         break;
                     }
-                    let ev = pending_judges.pop_front().unwrap();
-                    let Some(line) = chart.lines.get_mut(ev.line_id as usize) else {
-                        continue;
-                    };
-                    let Some(note) = line.notes.get_mut(ev.note_id as usize) else {
-                        continue;
-                    };
-
+                    let Reverse(OrdJudgeEvent(ev)) = pending_judges.pop().unwrap();
                     let line_idx = ev.line_id as usize;
+                    let Some(line) = chart.lines.get_mut(line_idx) else {
+                        continue;
+                    };
                     let note_idx = ev.note_id as usize;
+                    let Some(note) = line.notes.get_mut(note_idx) else {
+                        continue;
+                    };
 
-                    use phira_mp_common::Judgement as MpJudgement;
                     match ev.judgement {
                         MpJudgement::Perfect
                         | MpJudgement::Good
@@ -431,24 +492,24 @@ impl GameScene {
                                 _ => Judgement::Miss,
                             };
                             note.judge = JudgeStatus::Judged(ev.time, j);
-                            hook_events.push(crate::engine::JudgeEvent {
-                                kind: crate::engine::JudgeEventKind::Judged(j),
+                            hook_events.push(JudgeEvent {
+                                kind: JudgeEventKind::Judged(j),
                                 line_idx,
                                 note_idx,
                             });
                         }
                         MpJudgement::HoldPerfect => {
                             note.judge = JudgeStatus::Hold(true, t, 0.0, false, f32::INFINITY);
-                            hook_events.push(crate::engine::JudgeEvent {
-                                kind: crate::engine::JudgeEventKind::HoldStart,
+                            hook_events.push(JudgeEvent {
+                                kind: JudgeEventKind::HoldStart,
                                 line_idx,
                                 note_idx,
                             });
                         }
                         MpJudgement::HoldGood => {
                             note.judge = JudgeStatus::Hold(false, t, 0.0, false, f32::INFINITY);
-                            hook_events.push(crate::engine::JudgeEvent {
-                                kind: crate::engine::JudgeEventKind::HoldStart,
+                            hook_events.push(JudgeEvent {
+                                kind: JudgeEventKind::HoldStart,
                                 line_idx,
                                 note_idx,
                             });

@@ -3,8 +3,10 @@
 //! Ported from prpr/src/core/anim.rs
 //! Provides keyframe-based animation for chart elements.
 
-use super::tween::{BezierTween, ClampedTween, TweenFunction, TweenId, Tweenable, TWEEN_FUNCTIONS};
-use super::Vector;
+use super::{
+    tween::{BezierTween, ClampedTween, TweenFunction, TweenId, Tweenable, TWEEN_FUNCTIONS},
+    Vector,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]

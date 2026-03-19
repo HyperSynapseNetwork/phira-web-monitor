@@ -877,8 +877,7 @@ pub async fn parse_rpe(source: &str, fs: &mut dyn ResourceLoader) -> Result<Char
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use std::{future::Future, pin::Pin};
+    use std::{future::Future, path::PathBuf, pin::Pin};
 
     struct MockLoader;
     impl ResourceLoader for MockLoader {

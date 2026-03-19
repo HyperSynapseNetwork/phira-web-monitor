@@ -5,8 +5,7 @@
 
 use super::{Color, Vector};
 use serde::{Deserialize, Serialize};
-use std::f32::consts::PI;
-use std::ops::Range;
+use std::{f32::consts::PI, ops::Range};
 
 /// Type alias for tween function identifier
 pub type TweenId = u8;

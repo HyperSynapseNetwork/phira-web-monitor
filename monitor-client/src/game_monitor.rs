@@ -3,12 +3,16 @@
 mod game_scene;
 pub use game_scene::GameScene;
 
-use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    collections::{HashMap, VecDeque},
+    rc::Rc,
+};
 
-use monitor_common::core::{Chart, ChartInfo};
-use monitor_common::live::{LiveEvent, WsCommand};
+use monitor_common::{
+    core::{Chart, ChartInfo, JudgeLineKind},
+    live::{LiveEvent, WsCommand},
+};
 use phira_mp_common::{Message, RoomState, decode_packet, encode_packet};
 use wasm_bindgen_futures::spawn_local;
 
@@ -51,6 +55,10 @@ pub struct GameMonitor {
     pub _onclose: Closure<dyn FnMut(CloseEvent)>,
     #[wasm_bindgen(skip)]
     pub _onerror: Closure<dyn FnMut(ErrorEvent)>,
+
+    // Pending line texture load results (from spawn_local)
+    #[wasm_bindgen(skip)]
+    pub pending_line_textures: Rc<RefCell<Vec<i32>>>,
 }
 
 #[wasm_bindgen]
@@ -118,6 +126,7 @@ impl GameMonitor {
             _onmessage: onmessage,
             _onclose: onclose,
             _onerror: onerror,
+            pending_line_textures: Rc::new(RefCell::new(Vec::new())),
         })
     }
 
@@ -138,7 +147,7 @@ impl GameMonitor {
 
     /// Attach a `<canvas>` element to an existing headless scene.
     /// If no scene exists for this user, creates a headless one first.
-    pub fn attach_canvas(&mut self, user_id: i32, canvas_id: &str) -> Result<(), JsValue> {
+    pub async fn attach_canvas(&mut self, user_id: i32, canvas_id: &str) -> Result<(), JsValue> {
         // Ensure a headless scene exists
         self.scenes
             .entry(user_id)
@@ -153,7 +162,7 @@ impl GameMonitor {
             scene.load_chart(info.clone(), data.clone());
         }
 
-        scene.attach_canvas(canvas_id)?;
+        scene.attach_canvas(canvas_id).await?;
         console_log!("GameMonitor: attached canvas for user {}", user_id);
         Ok(())
     }
@@ -190,12 +199,32 @@ impl GameMonitor {
     /// Load chart data provided by the frontend (fetched via API)
     /// and apply it to all currently active scenes.
     fn load_chart(&mut self, info: ChartInfo, chart: Chart) {
+        // Check if any lines have custom textures
+        let has_custom_textures = chart.lines.iter().any(|line| {
+            matches!(
+                line.kind,
+                JudgeLineKind::Texture(_, _) | JudgeLineKind::TextureGif(_, _, _)
+            )
+        });
+
         self.chart_info = Some(info.clone());
         self.chart_data = Some(chart.clone());
+
+        // Collect scene IDs that need texture loading (have canvas and chart has textures)
+        let mut scenes_needing_textures = Vec::new();
 
         for (uid, scene) in self.scenes.iter_mut() {
             scene.load_chart(info.clone(), chart.clone());
             console_log!("GameMonitor: applied chart to scene for user {}", uid);
+            if has_custom_textures && scene.needs_texture_load() {
+                scenes_needing_textures.push(*uid);
+            }
+        }
+
+        // Spawn async texture loading for scenes that already have a canvas attached
+        if !scenes_needing_textures.is_empty() {
+            let pending = self.pending_line_textures.clone();
+            pending.borrow_mut().extend(scenes_needing_textures);
         }
     }
 
@@ -217,6 +246,26 @@ impl GameMonitor {
         if let Some((info, chart)) = pending {
             console_log!("GameMonitor: processing internally fetched chart...");
             self.load_chart(info, chart);
+        }
+
+        // Process pending line texture loads
+        let texture_uids: Vec<i32> = self.pending_line_textures.borrow_mut().drain(..).collect();
+        for uid in texture_uids {
+            if let Some(scene) = self.scenes.get_mut(&uid)
+                && scene.needs_texture_load()
+            {
+                console_log!("GameMonitor: spawning line texture load for scene {}", uid);
+                // We can't await here (tick is sync), so we use spawn_local.
+                // We need to use a raw pointer trick since GameScene is not 'static.
+                // SAFETY: The scene pointer is valid for the duration of the spawn_local
+                // future because GameMonitor (and thus scenes HashMap) lives for the
+                // lifetime of the WASM module, and spawn_local runs on the same thread.
+                let scene_ptr = scene as *mut GameScene;
+                spawn_local(async move {
+                    let scene = unsafe { &mut *scene_ptr };
+                    scene.load_line_textures().await;
+                });
+            }
         }
 
         let events: Vec<LiveEvent> = {

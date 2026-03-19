@@ -1,5 +1,7 @@
-use crate::engine::{RenderConfig, Resource, draw_note};
-use crate::renderer::Renderer;
+use crate::{
+    engine::{RenderConfig, Resource, draw_note},
+    renderer::Renderer,
+};
 use monitor_common::core::{ChartSettings, JudgeLine, JudgeLineKind, Matrix, Vector};
 
 pub fn draw_line(

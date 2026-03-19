@@ -4,12 +4,10 @@ use crate::{
     audio::AudioEngine,
     console_log,
     engine::{ChartRenderer, JudgeEventKind, Resource, ResourcePack},
-    renderer::{Renderer, Texture},
+    renderer::Renderer,
     time::TimeManager,
 };
-use monitor_common::core::{
-    Chart, ChartInfo, HitSound, JudgeLineKind, JudgeStatus, Judgement, NoteKind,
-};
+use monitor_common::core::{Chart, ChartInfo, HitSound, JudgeStatus, Judgement, NoteKind};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
@@ -262,32 +260,13 @@ impl ChartPlayer {
                 .map_err(|e| JsValue::from_str(&format!("Failed to restore pack: {}", e)))?;
         }
 
-        for (i, line) in chart.lines.iter().enumerate() {
-            match &line.kind {
-                JudgeLineKind::Texture(tex, _) => {
-                    if let Ok(texture) =
-                        Texture::load_from_bytes(&renderer.context, tex.data()).await
-                    {
-                        resource.line_textures.insert(i, texture);
-                    }
-                }
-                JudgeLineKind::TextureGif(_, frames, _) => {
-                    let mut gl_frames = Vec::new();
-                    for (_time, tex) in &frames.frames {
-                        if let Ok(texture) =
-                            Texture::load_from_bytes(&renderer.context, tex.data()).await
-                        {
-                            gl_frames.push(texture);
-                        }
-                    }
-                    resource.line_gif_textures.insert(i, gl_frames);
-                }
-                _ => {}
-            }
-        }
-
         let autoplay = self.chart_renderer.autoplay;
-        self.chart_renderer = ChartRenderer::new(info.clone(), chart);
+        let cr = ChartRenderer::new(info.clone(), chart);
+        cr.load_line_textures(&renderer.context, &mut resource)
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Failed to load line textures: {:?}", e)))?;
+
+        self.chart_renderer = cr;
         self.chart_renderer.autoplay = autoplay;
         self.resource = resource;
         self.time.seek_to(0.0);

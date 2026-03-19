@@ -3,8 +3,10 @@
 //! Ported from prpr/src/core/object.rs
 //! Provides transform animations for chart elements (notes, judge lines).
 
-use super::anim::{AnimFloat, AnimVector};
-use super::{Matrix, Vector};
+use super::{
+    anim::{AnimFloat, AnimVector},
+    Matrix, Vector,
+};
 use nalgebra::Rotation2;
 use serde::{Deserialize, Serialize};
 

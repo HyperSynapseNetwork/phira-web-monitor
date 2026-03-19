@@ -1,6 +1,5 @@
 use crate::renderer::{GlContext, Texture};
-use monitor_common::core::Color;
-use monitor_common::core::colors;
+use monitor_common::core::{Color, colors};
 use nalgebra::Vector2;
 use web_sys::{WebGl2RenderingContext, WebGlBuffer, WebGlProgram, WebGlVertexArrayObject};
 

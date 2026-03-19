@@ -407,7 +407,7 @@ function onCanvasRef(userId: number, el: HTMLCanvasElement | null) {
   nextTick(async () => {
     try {
       if (monitor) {
-        monitor.attach_canvas(userId, scene.canvasId);
+        await monitor.attach_canvas(userId, scene.canvasId);
         if (defaultFileMap.value) {
           monitorBusy = true;
           try {

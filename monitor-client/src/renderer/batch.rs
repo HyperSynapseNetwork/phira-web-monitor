@@ -1,5 +1,4 @@
-use super::context::GlContext;
-use super::texture::Texture;
+use super::{context::GlContext, texture::Texture};
 use wasm_bindgen::prelude::*;
 use web_sys::{WebGl2RenderingContext, WebGlBuffer, WebGlVertexArrayObject};
 

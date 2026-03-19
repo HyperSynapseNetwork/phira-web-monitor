@@ -1,6 +1,5 @@
 use super::context::GlContext;
-use wasm_bindgen::JsCast;
-use wasm_bindgen::prelude::*;
+use wasm_bindgen::{JsCast, prelude::*};
 use web_sys::{HtmlImageElement, WebGl2RenderingContext, WebGlTexture};
 
 use std::sync::atomic::{AtomicU32, Ordering};
