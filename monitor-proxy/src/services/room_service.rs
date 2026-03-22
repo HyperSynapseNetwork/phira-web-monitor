@@ -27,12 +27,13 @@ type UserMap = HashMap<i32, RoomId>;
 
 struct RoomMonitorState {
     authenticate_result: TaskResult<SResult<(UserInfo, Option<ClientRoomState>)>>,
-    room_result: TaskResult<SResult<(RoomMap, UserMap)>>,
+    room_result: TaskResult<SResult<()>>,
+    visited_user_queue: Mutex<Vec<i32>>,
 
     /// (room state, update events, next sync time)
     cached_room_state: RwLock<(RoomMap, UserMap)>,
     cached_events: RwLock<Vec<Event>>,
-    cached_visited_user: RwLock<HashSet<i32>>,
+    cached_visited_user: Mutex<HashSet<i32>>,
     next_sync_time: Mutex<Instant>,
     broadcast_tx: broadcast::Sender<Event>,
 }
@@ -48,9 +49,17 @@ impl MpClientState for RoomMonitorState {
                     .inspect_err(|e| warn!("error setting authenticate result: {e}"));
             }
             ServerCommand::RoomResponse(value) => {
+                let res = match value {
+                    Ok(state) => {
+                        self.cached_events.write().await.clear();
+                        *self.cached_room_state.write().await = state;
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                };
                 let _ = self
                     .room_result
-                    .put(value)
+                    .put(res)
                     .await
                     .inspect_err(|e| warn!("error setting room result: {e}"));
             }
@@ -63,7 +72,11 @@ impl MpClientState for RoomMonitorState {
                     .inspect_err(|e| warn!("error sending {event_type} event: {e}"));
             }
             ServerCommand::UserVisit(id) => {
-                self.cached_visited_user.write().await.insert(id);
+                let mut guard = self.cached_visited_user.lock().await;
+                if !guard.contains(&id) {
+                    self.visited_user_queue.lock().await.push(id);
+                    guard.insert(id);
+                }
             }
             _ => {
                 warn!("unsupported command: {cmd:?}, ignoring");
@@ -77,9 +90,10 @@ impl RoomMonitorState {
         Self {
             authenticate_result: TaskResult::new(),
             room_result: TaskResult::new(),
+            visited_user_queue: Mutex::default(),
             cached_room_state: RwLock::default(),
             cached_events: RwLock::default(),
-            cached_visited_user: RwLock::default(),
+            cached_visited_user: Mutex::default(),
             next_sync_time: Mutex::new(Instant::now()),
             broadcast_tx: broadcast::channel(1024).0,
         }
@@ -184,14 +198,12 @@ impl RoomService {
     async fn update_room_info(&self) -> Result<()> {
         let mut next_sync_time = self.client.next_sync_time.lock().await;
         if *next_sync_time < Instant::now() {
-            *self.client.cached_room_state.write().await = self
-                .client
+            self.client
                 .room_result
                 .acquire(|| self.client.send(ClientCommand::QueryRoomInfo))
                 .await?
                 .map_err(Error::msg)
                 .internal_server_error("failed to sync room info")?;
-            self.client.cached_events.write().await.clear();
             *next_sync_time = Instant::now() + Duration::from_secs(1);
         }
         Ok(())
@@ -226,30 +238,30 @@ impl RoomService {
     }
 
     async fn try_update_visited(&self, state: &AppState) -> Result<()> {
-        let cached_visited = std::mem::take(&mut *self.client.cached_visited_user.write().await);
-        if cached_visited.is_empty() {
+        let mut guard = self.client.visited_user_queue.lock().await;
+        let mut moved_q;
+        let qref = if guard.is_empty() {
             return Ok(());
-        }
+        } else if guard.len() < 16 {
+            &mut *guard
+        } else {
+            moved_q = std::mem::take(&mut *guard);
+            drop(guard);
+            &mut moved_q
+        };
 
-        let iter = cached_visited.iter().map(|id| visited_user::ActiveModel {
+        let iter = qref.iter().map(|id| visited_user::ActiveModel {
             phira_id: sea_orm::Set(*id),
         });
         let on_conflict = OnConflict::column(visited_user::Column::PhiraId)
             .do_nothing()
             .to_owned();
-        let res = visited_user::Entity::insert_many(iter)
+        visited_user::Entity::insert_many(iter)
             .on_conflict(on_conflict)
             .exec(&state.db)
             .await
-            .internal_server_error("failed to update visited users");
-        if res.is_err() {
-            // put back data
-            self.client
-                .cached_visited_user
-                .write()
-                .await
-                .extend(cached_visited);
-        }
-        res.map(|_| ())
+            .internal_server_error("failed to update visited users")?;
+        qref.clear();
+        Ok(())
     }
 }
