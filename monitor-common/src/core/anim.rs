@@ -3,8 +3,10 @@
 //! Ported from prpr/src/core/anim.rs
 //! Provides keyframe-based animation for chart elements.
 
-use super::tween::{BezierTween, ClampedTween, TweenFunction, TweenId, Tweenable, TWEEN_FUNCTIONS};
-use super::Vector;
+use super::{
+    tween::{BezierTween, ClampedTween, TweenFunction, TweenId, Tweenable, TWEEN_FUNCTIONS},
+    Vector,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -155,9 +157,7 @@ impl<T: Tweenable> Anim<T> {
     }
 
     pub fn now_opt(&self) -> Option<T> {
-        let Some(now) = self.now_opt_inner() else {
-            return None;
-        };
+        let now = self.now_opt_inner()?;
         Some(if let Some(next) = &self.next {
             T::add(&now, &next.now_opt().unwrap())
         } else {

@@ -110,9 +110,11 @@ impl AudioClip {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::File;
-    use std::io::{BufWriter, Write};
-    use std::path::PathBuf;
+    use std::{
+        fs::File,
+        io::{BufWriter, Write},
+        path::PathBuf,
+    };
 
     /// 辅助函数：生成一个简单的单声道 16-bit PCM WAV 文件
     /// 参数：文件路径、采样率、持续时间（秒）

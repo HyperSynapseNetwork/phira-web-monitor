@@ -5,186 +5,86 @@
 //! 2. Server-side chart parsing (download -> unzip -> parse -> bincode)
 //! 3. Disk-based chart caching with in-flight request deduplication
 
-use axum::{http::Method, middleware, routing::get, routing::post, Router};
-use axum_extra::extract::cookie;
 use clap::Parser;
-use phira_mp_common::generate_secret_key;
+use log::{error, info};
+use migration::{Migrator, MigratorTrait};
 use reqwest::Client;
-use std::{collections::HashMap, env, net::SocketAddr, path::PathBuf, sync::Arc};
-use tokio::sync::{broadcast, Mutex};
-use tower_http::{
-    cors::{Any, CorsLayer},
-    services::ServeDir,
-};
+use sea_orm::{Database, DatabaseConnection};
+use std::{net::SocketAddr, ops::Deref, sync::Arc};
 
-mod auth;
-mod chart;
-mod rooms;
-
-// ── CLI Arguments ──────────────────────────────────────────────────────────────
-
-fn default_cache_path() -> PathBuf {
-    let mut path: PathBuf = env::var_os("HOME").unwrap_or(".".into()).into();
-    path.push(".cache");
-    path.push("hsn-phira");
-    path
-}
-
-#[derive(Parser, Debug, Clone)]
-#[command(name = "monitor-proxy", about = "Phira Web Monitor Proxy Server")]
-pub struct Args {
-    /// Debug mode
-    #[arg(long)]
-    pub debug: bool,
-
-    /// Port to listen on
-    #[arg(long, default_value_t = 3080)]
-    pub port: u16,
-
-    /// Directory for disk-based chart cache
-    #[arg(long, default_value_os_t = default_cache_path())]
-    pub cache_dir: PathBuf,
-
-    /// Phira API base URL
-    #[arg(long, default_value = "https://phira.5wyxi.com")]
-    pub api_base: String,
-
-    /// Phira-mp server address
-    #[arg(long, default_value = "localhost:12346")]
-    pub mp_server: String,
-}
-
-// ── Application State ──────────────────────────────────────────────────────────
+mod config;
+mod dtos;
+mod entity;
+mod error;
+mod handlers;
+mod middlewares;
+mod router;
+mod services;
+mod utils;
 
 pub struct AppStateInner {
-    /// CLI arguments
-    pub args: Args,
-
-    /// HTTP client
+    pub config: config::Config,
+    pub db: DatabaseConnection,
     pub http_client: Client,
-
-    /// Room monitor client
-    pub room_monitor_client: rooms::RoomMonitorClient,
-
-    /// In-flight task deduplication: chart_id → broadcast sender.
-    /// Waiters receive Ok(()) on success (then read from disk), or Err(msg) on failure.
-    pub in_flight: Mutex<HashMap<String, broadcast::Sender<Result<(), String>>>>,
-
-    /// Secret key for cookie signing
-    pub cookie_key: cookie::Key,
+    pub auth_service: services::AuthService,
+    pub chart_service: services::ChartService,
+    pub room_service: services::RoomService,
+    pub live_service: services::LiveService,
 }
 
+#[derive(Clone)]
 pub struct AppState(Arc<AppStateInner>);
 
 impl AppState {
-    pub async fn new(args: Args) -> Self {
-        let cookie_key = cookie::Key::from(
-            &generate_secret_key("cookie", 64).expect("failed to generate key for cookie"),
-        );
-        let http_client = Client::new();
-        let room_monitor_client = rooms::RoomMonitorClient::new(&args.mp_server)
+    pub async fn new(config: config::Config) -> Self {
+        let db = Database::connect(&config.database_url)
             .await
-            .expect("failed to create RoomMonitorClient");
-        let in_flight = Mutex::default();
+            .expect("Failed to connect to database");
+
+        Migrator::up(&db, None)
+            .await
+            .expect("Failed to run database migrations");
+
+        info!("Database connected and migrations applied.");
+
+        let room_service = services::RoomService::new(&config.mp_server)
+            .await
+            .inspect_err(|e| error!("failed to setup RoomService: {e}"))
+            .unwrap();
 
         Self(Arc::new(AppStateInner {
-            args,
-            http_client,
-            room_monitor_client,
-            in_flight,
-            cookie_key,
+            config,
+            db,
+            http_client: Client::new(),
+            auth_service: services::AuthService::new(),
+            chart_service: services::ChartService::new(),
+            room_service,
+            live_service: services::LiveService::new(),
         }))
     }
 }
 
-impl std::ops::Deref for AppState {
+impl Deref for AppState {
     type Target = AppStateInner;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl Clone for AppState {
-    fn clone(&self) -> Self {
-        Self(Arc::clone(&self.0))
-    }
-}
-
-impl axum::extract::FromRef<AppState> for cookie::Key {
-    fn from_ref(state: &AppState) -> Self {
-        state.cookie_key.clone()
-    }
-}
-
-// ── Macros ─────────────────────────────────────────────────────────────────────
-
-#[macro_export]
-macro_rules! json_err {
-    ($($arg: tt)*) => {
-        {
-            use serde_json::json;
-            use axum::{Json, response::IntoResponse};
-            let msg = format!($($arg)*);
-            Json(json!({"error": msg})).into_response()
-        }
-    };
-}
-#[macro_export]
-macro_rules! json_msg {
-    ($($arg: tt)*) => {
-        {
-            use serde_json::json;
-            use axum::{Json, response::IntoResponse};
-            let msg = format!($($arg)*);
-            Json(json!({"message": msg})).into_response()
-        }
-    };
-}
-
-// ── Main ───────────────────────────────────────────────────────────────────────
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let args = Args::parse();
-    log::info!("Phira Web Monitor Proxy starting...");
-    log::info!("API Base: {}", args.api_base);
-    log::info!("Cache Dir: {:?}", args.cache_dir);
+    let config = config::Config::parse();
+    info!("Phira Web Monitor Proxy starting...");
+    info!("API Base: {}", config.api_base);
+    info!("Cache Dir: {:?}", config.cache_dir);
 
-    let port = args.port;
-    let state = AppState::new(args).await;
+    let state = AppState::new(config).await;
+    let addr = SocketAddr::new(state.config.host, state.config.port);
+    let app = router::init_router(state);
 
-    // CORS configuration
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers(Any);
-
-    let public_routes = Router::new()
-        .route("/chart/{id}", get(chart::fetch_and_parse_chart))
-        .route("/rooms/info", get(rooms::get_room_list))
-        .route("/rooms/info/{id}", get(rooms::get_room_by_id))
-        .route("/rooms/user/{id}", get(rooms::get_room_of_user))
-        .route("/rooms/listen", get(rooms::listen))
-        .route("/auth/login", post(auth::login));
-    let protected_routes = Router::new()
-        .route("/auth/me", get(auth::get_me_profile))
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth::auth_middleware,
-        ));
-
-    let app = Router::new()
-        .merge(public_routes)
-        .merge(protected_routes)
-        .fallback_service(ServeDir::new("../web/dist"))
-        .with_state(state)
-        .layer(cors);
-
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     log::info!("Listening on http://{addr}");
-
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
 

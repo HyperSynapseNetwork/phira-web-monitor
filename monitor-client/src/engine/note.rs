@@ -1,5 +1,7 @@
-use crate::engine::resource::Resource;
-use crate::renderer::{Renderer, Texture};
+use crate::{
+    engine::resource::{Rect, Resource},
+    renderer::{Renderer, Texture},
+};
 use monitor_common::core::{JudgeLine, JudgeStatus, Note, NoteKind};
 use nalgebra::{Matrix3, Vector2};
 
@@ -18,17 +20,7 @@ pub fn draw_note(
     config: &RenderConfig,
     renderer: &mut Renderer,
 ) {
-    // Gate rendering by judge status
-    match &note.judge {
-        JudgeStatus::Judged => {
-            if !matches!(note.kind, NoteKind::Hold { .. }) {
-                // Click/Drag/Flick: stop rendering once judged
-                return;
-            }
-            // Hold notes that are Judged = miss; will render at 50% alpha below
-        }
-        _ => {}
-    }
+    // Gate rendering by judge status removed per prompt rules
 
     let res_pack = res.res_pack.as_ref().unwrap();
     let style_ref = if note.multiple_hint {
@@ -65,11 +57,6 @@ pub fn draw_note(
             let body_rect = style_ref.hold_body_rect();
             let tail_rect = style_ref.hold_tail_rect();
             let hold_tex = style_ref.hold.clone();
-            let alpha = if matches!(note.judge, JudgeStatus::Judged) {
-                0.5
-            } else {
-                1.0
-            };
 
             draw_hold_note(
                 res,
@@ -106,11 +93,8 @@ fn draw_simple_note(
     // Future Note: note > line. Result Positive (Above).
     let y_pos = (note_height_val - line_height_val) * spd / config.aspect_ratio;
 
-    // If y_pos < 0, it means it's below the line (Past).
-    // If not drawing below, skip.
-    if !config.draw_below && y_pos < -0.001 {
-        return;
-    }
+    // Removed: If y_pos < 0, it means it's below the line (Past).
+    // Allow notes to render below the line.
 
     let transform = Matrix3::new_translation(&Vector2::new(x, y_pos));
     res.with_model(transform, |res| {
@@ -119,7 +103,31 @@ fn draw_simple_note(
         let w = scale * 2.0 * obj_scale_x;
         // Adjust aspect ratio of texture
         let h = w * (texture.height as f32 / texture.width as f32);
-        let alpha = note.object.alpha.now_opt().unwrap_or(1.0) * config.alpha;
+        let t = res.time;
+        let is_judged = match note.judge {
+            JudgeStatus::Judged(jt, _) => t >= jt,
+            _ => false,
+        };
+        let basic_opacity = if is_judged {
+            0.0
+        } else {
+            if t < note.time || note.fake {
+                if y_pos >= -0.001 || config.draw_below {
+                    1.0
+                } else {
+                    0.0
+                }
+            } else {
+                let fade = 1.0 - (t - note.time) / 0.16;
+                fade.clamp(0.0, 1.0)
+            }
+        };
+
+        let alpha = note.object.alpha.now_opt().unwrap_or(1.0) * config.alpha * basic_opacity;
+
+        if alpha < 0.001 {
+            return;
+        }
 
         renderer.set_texture(&texture);
         renderer.draw_texture_rect(
@@ -140,13 +148,14 @@ fn draw_simple_note(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_hold_note(
     res: &mut Resource,
     note: &Note,
     texture: Texture,
-    head_rect: crate::engine::resource::Rect,
-    body_rect: crate::engine::resource::Rect,
-    tail_rect: crate::engine::resource::Rect,
+    head_rect: Rect,
+    body_rect: Rect,
+    tail_rect: Rect,
     scale: f32,
     config: &RenderConfig,
     renderer: &mut Renderer,
@@ -162,10 +171,7 @@ fn draw_hold_note(
     let raw_head_y = (note_height_val - line_height_val) * spd / config.aspect_ratio;
     let raw_tail_y = (note_end_height_val - line_height_val) * spd / config.aspect_ratio;
 
-    // If fully passed, return
-    if raw_tail_y < 0.0 {
-        return;
-    }
+    // Allow Hold notes to render below the line
 
     // For active Hold notes, clamp head to line position (head doesn't go below line)
     let clamped_head_y = if matches!(note.judge, JudgeStatus::Hold(..)) {
@@ -179,13 +185,19 @@ fn draw_hold_note(
     res.with_model(transform, |res| {
         let obj_scale_x = note.object.scale.x.now_opt().unwrap_or(1.0);
         let width = scale * 2.0 * obj_scale_x;
-        let alpha = note.object.alpha.now_opt().unwrap_or(1.0)
-            * config.alpha
-            * if matches!(note.judge, JudgeStatus::Judged) {
-                0.5
-            } else {
-                1.0
-            };
+        let t = res.time;
+
+        let is_judged = match note.judge {
+            JudgeStatus::Judged(jt, _) => t >= jt,
+            _ => false,
+        };
+
+        let basic_opacity = if is_judged { 0.5 } else { 1.0 };
+        let alpha = note.object.alpha.now_opt().unwrap_or(1.0) * config.alpha * basic_opacity;
+
+        if alpha < 0.001 {
+            return;
+        }
 
         renderer.set_texture(&texture);
 
@@ -193,7 +205,7 @@ fn draw_hold_note(
         // y: bottom position of the part
         // h: height of the part
         // r: source rect (u, v, w, h)
-        let mut draw_part = |y: f32, h: f32, r: crate::engine::resource::Rect| {
+        let mut draw_part = |y: f32, h: f32, r: Rect| {
             if h <= 0.0001 {
                 return;
             }
@@ -202,8 +214,8 @@ fn draw_hold_note(
             let mut draw_v = r.y;
             let mut draw_vs = r.h;
 
-            // Clip bottom
-            if draw_y < 0.0 {
+            // Clip bottom only if config.draw_below is false
+            if !config.draw_below && draw_y < 0.0 {
                 let diff = -draw_y;
                 if diff >= draw_h {
                     return;
@@ -242,7 +254,7 @@ fn draw_hold_note(
         let head_y = clamped_head_y;
         let tail_y = raw_tail_y;
 
-        let is_compact = res.res_pack.as_ref().map_or(false, |p| p.info.hold_compact);
+        let is_compact = res.res_pack.as_ref().is_some_and(|p| p.info.hold_compact);
 
         let draw_head_y = head_y - if is_compact { head_h / 2.0 } else { head_h };
         let draw_tail_y = tail_y - if is_compact { tail_h / 2.0 } else { 0.0 };

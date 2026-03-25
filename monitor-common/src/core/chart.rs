@@ -12,10 +12,14 @@ use std::collections::HashMap;
 // Note types
 // ============================================================================
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub enum NoteKind {
+    #[default]
     Click,
-    Hold { end_time: f32, end_height: f32 },
+    Hold {
+        end_time: f32,
+        end_height: f32,
+    },
     Flick,
     Drag,
 }
@@ -36,28 +40,15 @@ impl NoteKind {
     }
 }
 
-impl Default for NoteKind {
-    fn default() -> Self {
-        Self::Click
-    }
-}
+pub use phira_mp_common::Judgement;
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug)]
 pub enum JudgeStatus {
     #[default]
     NotJudged,
     PreJudge,
-    Judged,
+    Judged(f32, Judgement),          // (timestamp, judgement)
     Hold(bool, f32, f32, bool, f32), // perfect, at, diff, pre-judge, up-time
-}
-
-#[repr(u8)]
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-pub enum Judgement {
-    Perfect,
-    Good,
-    Bad,
-    Miss,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -224,6 +215,42 @@ impl JudgeLine {
     /// Get note count
     pub fn note_count(&self) -> usize {
         self.notes.iter().filter(|n| !n.fake).count()
+    }
+
+    /// Sort notes structurally using the exact same logic as `prpr`'s JudgeLineCache
+    /// This fixes note id assignments mismatch when comparing events mapped to the physical array.
+    pub fn sort_notes(&mut self) {
+        self.notes.sort_by(|a, b| {
+            a.plain()
+                .cmp(&b.plain())
+                .then_with(|| (!a.above).cmp(&!b.above))
+                .then_with(|| {
+                    a.speed
+                        .partial_cmp(&b.speed)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| {
+                    let a_y = a
+                        .object
+                        .translation
+                        .y
+                        .keyframes
+                        .first()
+                        .map(|k| k.value)
+                        .unwrap_or(0.0);
+                    let b_y = b
+                        .object
+                        .translation
+                        .y
+                        .keyframes
+                        .first()
+                        .map(|k| k.value)
+                        .unwrap_or(0.0);
+                    ((a.height + a_y) * a.speed)
+                        .partial_cmp(&((b.height + b_y) * b.speed))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        });
     }
 }
 

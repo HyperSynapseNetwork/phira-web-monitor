@@ -43,6 +43,10 @@ impl GlContext {
         self.gl.viewport(0, 0, width as i32, height as i32);
     }
 
+    pub fn set_viewport(&mut self, x: i32, y: i32, width: u32, height: u32) {
+        self.gl.viewport(x, y, width as i32, height as i32);
+    }
+
     pub fn clear(&self, r: f32, g: f32, b: f32, a: f32) {
         self.gl.clear_color(r, g, b, a);
         self.gl.clear(WebGl2RenderingContext::COLOR_BUFFER_BIT);

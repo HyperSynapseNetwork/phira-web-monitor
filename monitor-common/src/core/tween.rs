@@ -5,8 +5,7 @@
 
 use super::{Color, Vector};
 use serde::{Deserialize, Serialize};
-use std::f32::consts::PI;
-use std::ops::Range;
+use std::{f32::consts::PI, ops::Range};
 
 /// Type alias for tween function identifier
 pub type TweenId = u8;
@@ -251,8 +250,8 @@ pub struct BezierTween {
 impl BezierTween {
     pub fn new(p1: (f32, f32), p2: (f32, f32)) -> Self {
         let mut sample_table = [0.0; SAMPLE_TABLE_SIZE];
-        for i in 0..SAMPLE_TABLE_SIZE {
-            sample_table[i] = Self::sample(p1.0, p2.0, i as f32 * SAMPLE_STEP);
+        for (i, item) in sample_table.iter_mut().enumerate() {
+            *item = Self::sample(p1.0, p2.0, i as f32 * SAMPLE_STEP);
         }
         Self {
             sample_table,
@@ -443,12 +442,10 @@ impl Tweenable for String {
                         .collect::<String>(),
                 );
                 text
+            } else if x.contains("%P%") {
+                x.replace("%P%", "")
             } else {
-                if x.contains("%P%") {
-                    x.replace("%P%", "")
-                } else {
-                    x.clone()
-                }
+                x.clone()
             }
         }
     }
