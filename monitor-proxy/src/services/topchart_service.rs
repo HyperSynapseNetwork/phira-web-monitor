@@ -201,10 +201,10 @@ impl TopChartService {
                 .copied()
                 .map(|(id, current)| chart_statistic::ActiveModel {
                     chart_id: Set(id),
-                    count_hour: Set(current - baselines_h.get(&id).unwrap_or(&current)),
-                    count_day: Set(current - baselines_d.get(&id).unwrap_or(&current)),
-                    count_week: Set(current - baselines_w.get(&id).unwrap_or(&current)),
-                    count_month: Set(current - baselines_m.get(&id).unwrap_or(&current)),
+                    count_hour: Set(current - baselines_h.get(&id).unwrap_or(&0)),
+                    count_day: Set(current - baselines_d.get(&id).unwrap_or(&0)),
+                    count_week: Set(current - baselines_w.get(&id).unwrap_or(&0)),
+                    count_month: Set(current - baselines_m.get(&id).unwrap_or(&0)),
                 }),
             DEFAULT_BATCH_SIZE,
             |q| {

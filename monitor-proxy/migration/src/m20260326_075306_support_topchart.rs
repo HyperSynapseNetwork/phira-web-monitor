@@ -76,12 +76,6 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(ChartRecords::Table).to_owned())
-            .await?;
-        manager
-            .drop_table(Table::drop().table(ChartStatistics::Table).to_owned())
-            .await?;
-        manager
             .drop_index(
                 Index::drop()
                     .name("idx_chart_statistics_count_hour")
@@ -108,6 +102,12 @@ impl MigrationTrait for Migration {
                     .name("idx_chart_statistics_count_month")
                     .to_owned(),
             )
+            .await?;
+        manager
+            .drop_table(Table::drop().table(ChartStatistics::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(ChartRecords::Table).to_owned())
             .await?;
         Ok(())
     }
