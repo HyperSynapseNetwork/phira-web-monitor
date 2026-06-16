@@ -1,0 +1,132 @@
+use sea_orm_migration::{prelude::*, schema::*};
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .create_table(
+                Table::create()
+                    .table(ChartRecords::Table)
+                    .if_not_exists()
+                    .col(integer(ChartRecords::ChartId).not_null())
+                    .col(big_integer(ChartRecords::Timestamp).not_null())
+                    .col(integer(ChartRecords::Count).not_null())
+                    .primary_key(
+                        Index::create()
+                            .col(ChartRecords::ChartId)
+                            .col(ChartRecords::Timestamp),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                Table::create()
+                    .table(ChartStatistics::Table)
+                    .if_not_exists()
+                    .col(integer(ChartStatistics::ChartId).primary_key().not_null())
+                    .col(integer(ChartStatistics::CountHour).default(0).not_null())
+                    .col(integer(ChartStatistics::CountDay).default(0).not_null())
+                    .col(integer(ChartStatistics::CountWeek).default(0).not_null())
+                    .col(integer(ChartStatistics::CountMonth).default(0).not_null())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_chart_statistics_count_hour")
+                    .table(ChartStatistics::Table)
+                    .col(ChartStatistics::CountHour)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_chart_statistics_count_day")
+                    .table(ChartStatistics::Table)
+                    .col(ChartStatistics::CountDay)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_chart_statistics_count_week")
+                    .table(ChartStatistics::Table)
+                    .col(ChartStatistics::CountWeek)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_chart_statistics_count_month")
+                    .table(ChartStatistics::Table)
+                    .col(ChartStatistics::CountMonth)
+                    .to_owned(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(Table::drop().table(ChartRecords::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(ChartStatistics::Table).to_owned())
+            .await?;
+        manager
+            .drop_index(
+                Index::drop()
+                    .name("idx_chart_statistics_count_hour")
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .drop_index(
+                Index::drop()
+                    .name("idx_chart_statistics_count_day")
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .drop_index(
+                Index::drop()
+                    .name("idx_chart_statistics_count_week")
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .drop_index(
+                Index::drop()
+                    .name("idx_chart_statistics_count_month")
+                    .to_owned(),
+            )
+            .await?;
+        Ok(())
+    }
+}
+
+#[derive(DeriveIden)]
+enum ChartRecords {
+    Table,
+    ChartId,
+    Timestamp,
+    Count,
+}
+
+#[derive(DeriveIden)]
+enum ChartStatistics {
+    Table,
+    ChartId,
+    CountHour,
+    CountDay,
+    CountWeek,
+    CountMonth,
+}

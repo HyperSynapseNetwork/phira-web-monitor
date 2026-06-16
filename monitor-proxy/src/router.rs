@@ -23,7 +23,9 @@ pub fn init_router(state: AppState) -> Router {
         .route("/rooms/info", get(handlers::get_room_list))
         .route("/rooms/info/{id}", get(handlers::get_room_by_id))
         .route("/rooms/user/{id}", get(handlers::get_room_of_user))
-        .route("/rooms/listen", get(handlers::listen));
+        .route("/rooms/listen", get(handlers::listen))
+        .route("/hot_rank/{time_range}", get(handlers::get_hot_rank))
+        .route("/chart_rank/{chart_id}", get(handlers::get_chart_rank));
 
     // CORS configuration
     let cors = if state.config.debug {

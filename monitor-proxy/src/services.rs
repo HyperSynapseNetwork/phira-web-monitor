@@ -9,3 +9,6 @@ pub use room_service::*;
 
 pub mod live_service;
 pub use live_service::*;
+
+pub mod topchart_service;
+pub use topchart_service::*;
