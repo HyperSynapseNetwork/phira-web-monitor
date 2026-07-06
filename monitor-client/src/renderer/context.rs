@@ -1,6 +1,7 @@
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, WebGl2RenderingContext, WebGlProgram, WebGlShader};
 
+#[derive(Clone)]
 pub struct GlContext {
     pub gl: WebGl2RenderingContext,
     pub width: u32,

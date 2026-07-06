@@ -1,35 +1,27 @@
 ---
 sources:
+  - "README.md"
   - "monitor-proxy/src/router.rs"
   - "monitor-proxy/src/handlers/**/*.rs"
+  - "monitor-proxy/src/dtos/**/*.rs"
   - "monitor-proxy/src/middlewares/**/*.rs"
-  - "monitor-proxy/src/dtos/*.rs"
   - "monitor-common/src/live.rs"
-  - "README.md"
 ---
-
 # API Reference
 
 ## Endpoints
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `POST` | `/auth/login` | No | Proxy login to the official Phira API and return a local JWT |
-| `GET` | `/auth/me` | Yes | Return the current user profile derived from the stored upstream token |
-| `GET` | `/chart/{id}` | No | Stream a serialized chart payload (`application/octet-stream`) for WASM consumption |
-| `GET` | `/rooms/info` | No | Return the current room list |
-| `GET` | `/rooms/info/{id}` | No | Return one room by room ID |
-| `GET` | `/rooms/user/{id}` | No | Return the room containing a given user, or `null` |
-| `GET` | `/rooms/listen` | No | SSE stream of room updates, plus initial replay |
-| `GET` | `/visited` | No | Return count or list of visited users |
-| `GET` | `/ws/live` | Yes | Authenticated WebSocket for live gameplay monitoring |
-| `GET` | `/hot_rank/{time_range}` | No | Paginated hot-chart ranking for `hour`, `day`, `week`, or `month` |
-| `GET` | `/chart_rank/{chart_id}` | No | Rank snapshot for one chart across all supported time windows |
-
-Auth notes:
-
-- `/auth/me` expects `Authorization: Bearer <token>`.
-- `/ws/live` is protected by the same middleware and can use either the `Authorization` header or `?token=<jwt>` query parameter during WebSocket upgrade.
+| `POST` | `/auth/login` | Public | Authenticates against Phira credentials and returns a proxy JWT. |
+| `GET` | `/auth/me` | Bearer token / auth middleware | Returns the current authenticated user's profile. |
+| `GET` | `/ws/live` | Auth token accepted by auth middleware | Upgrades to a binary WebSocket for live room monitor commands and events. |
+| `GET` | `/visited` | Public | Returns visited Phira user count and, optionally, user IDs. |
+| `GET` | `/chart/{id}` | Public | Streams a processed chart binary as `application/octet-stream`. |
+| `GET` | `/rooms/info` | Public | Returns all active rooms. |
+| `GET` | `/rooms/info/{id}` | Public | Returns details for one room ID. |
+| `GET` | `/rooms/user/{id}` | Public | Returns the room containing a given Phira user ID, if any. |
+| `GET` | `/rooms/listen` | Public | Opens an SSE stream of room lifecycle events. |
 
 ## Request / Response
 
@@ -38,132 +30,85 @@ Auth notes:
 **Request:**
 ```json
 {
-  "email": "user@example.com",
-  "password": "plain-text password"
+  "email": "string",
+  "password": "string"
 }
 ```
 
 **Response:**
 ```json
 {
-  "token": "local-jwt"
+  "token": "jwt string"
 }
 ```
 
 ### `GET /auth/me`
 
+**Auth:** authenticated through `middlewares::require_auth`.
+
 **Response:**
 ```json
 {
-  "id": 123,
-  "username": "display name",
-  "phira_avatar": "https://...",
-  "phira_id": 456,
-  "phira_rks": 15.37,
-  "phira_username": "official profile name",
-  "register_time": "2026-01-01T00:00:00Z",
-  "last_login_time": "2026-06-16T00:00:00Z"
+  "id": 0,
+  "username": "string",
+  "phira_avatar": "string or null",
+  "phira_id": 0,
+  "phira_rks": 0.0,
+  "phira_username": "string",
+  "register_time": "ISO-8601 timestamp",
+  "last_login_time": "ISO-8601 timestamp"
 }
 ```
+
+### `GET /visited?count_only=false`
+
+**Response:**
+```json
+{
+  "count": 0,
+  "users": [
+    { "phira_id": 0 }
+  ]
+}
+```
+
+When `count_only=true`, the `users` field is omitted.
 
 ### `GET /rooms/info`
 
-**Response shape:**
+**Response:**
 ```json
 {
-  "total": 2,
   "rooms": [
     {
-      "name": "abcd",
-      "data": {
-        "host": 1,
-        "users": [1, 2],
-        "lock": false,
-        "cycle": false,
-        "chart": 1234,
-        "state": "PLAYING",
-        "rounds": []
-      }
+      "name": "room id",
+      "data": "phira_mp_common::RoomData JSON shape"
     }
-  ]
+  ],
+  "total": 1
 }
 ```
 
-### `GET /visited?count_only=true|false`
+### `GET /rooms/info/{id}` and `GET /rooms/user/{id}`
 
-**Response shape:**
-```json
-{
-  "count": 42,
-  "users": [
-    { "phira_id": 1001 }
-  ]
-}
-```
-`users` is omitted when `count_only=true`.
+Return a `RoomInfoResponse` JSON value when a room is found. User room lookup may return `null` depending on service result.
 
-### `GET /hot_rank/{time_range}?page=<u32>&per_page=<u32>`
+### `GET /rooms/listen`
 
-**Response shape:**
-```json
-{
-  "last_chart_list_update": "2026-06-16T00:00:00Z",
-  "last_record_update": "2026-06-16T00:00:00Z",
-  "page": 1,
-  "per_page": 20,
-  "time_range": "day",
-  "total_results": 200,
-  "results": [
-    {
-      "chart_id": 1234,
-      "increase": 87
-    }
-  ]
-}
-```
+Returns `text/event-stream` with keepalive every 10 seconds. Documented event names include `create_room`, `update_room`, `join_room`, `leave_room`, and `new_round`; payloads are JSON room lifecycle data.
 
-### `GET /chart_rank/{chart_id}`
+### `GET /chart/{id}`
 
-**Response shape:**
-```json
-{
-  "chart_id": 1234,
-  "ranks": {
-    "hour": { "increase": 4, "rank": 12, "last_update": "2026-06-16T00:00:00Z" },
-    "day": { "increase": 21, "rank": 5, "last_update": "2026-06-16T00:00:00Z" },
-    "week": { "increase": 90, "rank": 7, "last_update": "2026-06-16T00:00:00Z" },
-    "month": { "increase": 310, "rank": 9, "last_update": "2026-06-16T00:00:00Z" }
-  }
-}
-```
+Returns `application/octet-stream` containing bincode-encoded chart data consumed by `monitor-client`.
 
 ### `GET /ws/live`
 
-The WebSocket transports binary `monitor_common::live::LiveEvent` payloads. Browser commands are binary `WsCommand` values:
-
-- `Join { room_id }`
-- `Leave`
-- `Ready`
-
-Server events include:
-
-- `Authenticate`
-- `Join`
-- `Leave`
-- `Touches`
-- `Judges`
-- `StateChange`
-- `UserJoin`
-- `UserLeave`
-- `Message`
+Upgrades to WebSocket. The browser-side `GameMonitor` sends binary-encoded `WsCommand` values such as join, leave, and ready. The server sends binary-encoded live events consumed by `GameMonitor`.
 
 ## Rate Limiting
 
-| Window | Limit | Behavior |
-|--------|-------|----------|
-| N/A | Not implemented in current code | Clients are accepted until upstream or infrastructure limits apply |
+No rate limiting middleware or per-endpoint throttle policy is configured in the repository.
 
 ## Pagination
 
-- `/hot_rank/{time_range}` uses explicit `page` and `per_page` query parameters and returns `total_results`.
-- Room, visited-user, chart, SSE, and WebSocket endpoints are not paginated.
+No paginated endpoint exists. `/visited` supports `count_only`, but not limit/offset pagination.

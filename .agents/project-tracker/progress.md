@@ -2,34 +2,39 @@
 
 ## Current Phase
 
-Feature expansion and stabilization of the proxy/runtime stack, with recent work adding chart-ranking persistence plus cache-related backend changes.
+Functional integration phase: the repository contains a working Rust backend, shared domain crate, WASM renderer, Vue frontend, CI checks, and deployment instructions, but frontend CI and operational packaging are not yet codified.
 
 ## Completed
 
-- [x] Rust workspace split into shared core, backend proxy, migration crate, and WASM renderer/client.
-- [x] Browser-side chart playback via `monitor-client` and the Vue `PlayerView`.
-- [x] Authenticated multiplayer monitoring flow through `/auth/login`, `/auth/me`, `/ws/live`, and WASM `GameMonitor`.
-- [x] Chart download, unzip, parse, bincode serialization, and disk-cache reuse in `ChartService`.
-- [x] Room listing, room lookup, visited-user capture, and SSE room-event replay in `RoomService`.
-- [x] GitHub Actions coverage for Rust formatting, clippy, and tests.
-- [x] SeaORM migrations for `visited_users`, `chart_records`, and `chart_statistics`.
-- [x] Ranking endpoints for hot charts and per-chart rank snapshots.
+- [x] Rust workspace with `monitor-common`, `monitor-proxy`, `monitor-client`, and migration crates.
+- [x] Axum backend with public room/chart/visited endpoints, login endpoint, protected profile endpoint, and protected live WebSocket endpoint.
+- [x] SeaORM migration for `visited_users` persistence.
+- [x] Disk-based chart cache and server-side chart processing path.
+- [x] WebAssembly chart player and live monitor engine with WebGL/Web Audio integration.
+- [x] Vue 3 frontend with player and monitor tabs, Naive UI components, and English/Chinese i18n.
+- [x] GitHub Actions CI for Rust formatting, Clippy, and tests.
+- [x] README with architecture, API, development, and production deployment guidance.
 
 ## In Progress
 
-- [ ] Top-chart feature integration is present in the backend worktree, but no matching frontend surface was found under `web/src/`.
-- [ ] Deployment remains manual; no checked-in container, process-manager, or platform automation is present.
+- [ ] Stabilize production runtime configuration and secret/config documentation.
+- [ ] Expand automated test coverage beyond current Rust checks.
+- [ ] Align README runtime environment notes with `monitor-proxy::Config` requirements.
 
 ## Known Issues & Technical Debt
 
-- Frontend build/lint/test steps are not enforced in CI.
-- Generated directories (`web/dist`, `web/pkg`, `monitor-client/pkg`) are checked into the repo, which raises the cost of keeping source and derived artifacts in sync.
-- Persistence and deployment assumptions are lightly documented in code; the DB backend is configurable, but local docs/examples are SQLite-centric.
-- Public API endpoints do not show explicit rate limiting or abuse controls in code.
+- Frontend build/test checks are not included in GitHub Actions.
+- No Dockerfile, compose file, systemd unit, or deployment script is checked in.
+- No health-check endpoint is defined for the backend.
+- Coverage thresholds and coverage tooling are not configured.
+- README mentions `HSN_SECRET_KEY`, while the current checked-in `Config` requires `DATABASE_URL` and does not define that variable.
+- Some frontend console logging remains in runtime paths.
 
 ## Roadmap
 
-- [ ] Expose ranking endpoints in the frontend if the hot-chart feature is intended to be user-facing.
-- [ ] Add frontend verification to CI, at minimum a `vite build` step and optionally type-checking.
-- [ ] Document or automate the production process for web asset hosting plus backend process management.
-- [?] Add broader integration coverage around proxy-to-mp-server interactions if a stable test harness becomes available.
+- [ ] Add CI steps for `wasm-pack build`, `npm ci`, and `npm run build` after deciding how generated `web/pkg` should be managed in CI.
+- [ ] Add backend health/readiness endpoints if the service is deployed behind orchestration or uptime monitoring.
+- [ ] Add deployment artifacts such as Dockerfile, compose, or systemd service templates.
+- [ ] Add integration tests for backend routes and service boundaries.
+- [ ] Add frontend/component or browser tests for login, chart load, and live monitor flows.
+- [?] Formalize API schema generation from Rust DTOs or a maintained OpenAPI document.

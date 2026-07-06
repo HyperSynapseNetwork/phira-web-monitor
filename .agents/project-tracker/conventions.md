@@ -1,18 +1,12 @@
 ---
 sources:
-  - ".github/workflows/*.yml"
   - "Cargo.toml"
-  - "monitor-common/Cargo.toml"
-  - "monitor-client/Cargo.toml"
-  - "monitor-proxy/Cargo.toml"
-  - "monitor-common/src/**/*.rs"
-  - "monitor-client/src/**/*.rs"
-  - "monitor-proxy/src/**/*.rs"
-  - "web/src/**/*"
+  - "monitor-*/Cargo.toml"
   - "web/package.json"
-  - "web/vite.config.ts"
+  - "web/tsconfig.json"
+  - ".github/workflows/*.yml"
+  - "README.md"
 ---
-
 # Project Conventions
 
 > Agents MUST read and follow these conventions.
@@ -21,75 +15,77 @@ sources:
 
 | Aspect | Rule | Config |
 |--------|------|--------|
-| Formatter | Rust code is expected to satisfy `cargo fmt --all -- --check` | `.github/workflows/ci.yml` |
-| Linter | Rust code is expected to satisfy `cargo clippy --all-targets --all-features -- -D warnings` | `.github/workflows/ci.yml` |
-| Max line length | No explicit limit found; preserve existing formatting style | Not specified |
-| Indentation | Rust, TypeScript, and Vue files use 4-space or 2-space indentation according to existing file style; preserve local style per file | Inferred from source |
-| Quote style | TypeScript/Vue uses double quotes consistently; Rust uses standard Rust string style | Inferred from source |
-| Semicolons | Required in Rust statements; TypeScript code uses semicolons | Inferred from source |
-| Trailing commas | Common in Rust and TS multiline literals; preserve existing usage | Inferred from source |
+| Rust formatter | Use `rustfmt`; CI enforces `cargo fmt --all -- --check`. | Rust default config |
+| Rust linter | Clippy warnings are errors in CI. | `.github/workflows/ci.yml` |
+| TypeScript style | Existing Vue files use double quotes, semicolons, Composition API, and two-space indentation. | `web/src/**/*.vue`, `web/src/**/*.ts` |
+| Frontend build | Vite is the authoritative frontend build tool. | `web/package.json`, `web/vite.config.ts` |
+| Max line length | Not explicitly configured. Match surrounding code and formatter output. | N/A |
+| Trailing commas | Existing frontend code uses trailing commas in multiline literals and calls. Rust follows rustfmt. | Existing source style |
 
 ## Naming Conventions
 
 | Category | Convention | Example |
-|----------|-----------|---------|
-| Rust files / modules | `snake_case` | `topchart_service.rs`, `auth_middleware.rs` |
-| Vue components | `PascalCase.vue` | `MonitorView.vue`, `PlayerView.vue` |
-| Variables | Rust `snake_case`, TS `camelCase` | `cache_dir`, `activeTab` |
-| Constants | `UPPER_SNAKE_CASE` | `MAX_PARALLEL_REQUESTS`, `QUERY_BUFFER` |
-| Functions / methods | Rust `snake_case`, TS `camelCase` | `get_room_list`, `switchLocale` |
-| Types / structs / enums | `PascalCase` | `AppState`, `ChartRankResponse`, `GameMonitor` |
+|----------|------------|---------|
+| Rust files / modules | `snake_case` modules grouped by responsibility. | `auth_handler.rs`, `chart_service.rs` |
+| Rust variables / functions | `snake_case`. | `get_room_by_id`, `allowed_origin` |
+| Rust types | `PascalCase`. | `AppState`, `ChartPlayer`, `RoomListResponse` |
+| Vue components | `PascalCase` filenames. | `MonitorView.vue`, `PlayerView.vue` |
+| TypeScript variables / functions | `camelCase`. | `wsBaseFromApi`, `selectedUserId` |
+| Environment variables | `UPPER_SNAKE_CASE`. | `DATABASE_URL`, `VITE_API_BASE` |
 
 ## Architectural Rules
 
-- Shared domain or protocol changes should land in `monitor-common` first, then be consumed by proxy and WASM code.
-- Backend handlers should remain thin adapters over `services/*`; do not move business logic back into route handlers.
-- Authentication for protected backend flows must go through `auth_middleware` and `AuthService`.
-- Browser-facing chart payloads are serialized bincode outputs produced by the proxy; the frontend should not reimplement chart parsing in TypeScript.
-- **Forbidden**: hand-edit generated package outputs in `web/pkg/`, `monitor-client/pkg/`, or built assets in `web/dist/` unless the change is explicitly about generated artifacts.
+- Keep shared protocol and chart types in `monitor-common` when they are needed by both backend and WASM code.
+- Keep Axum handlers thin; non-trivial backend behavior belongs in `monitor-proxy/src/services` or `monitor-proxy/src/utils`.
+- Keep authenticated-only backend routes inside the protected router layer in `router.rs`.
+- Preserve the WASM public API shape expected by `web/src/views`: `ChartPlayer` for standalone playback and `GameMonitor` for live monitoring.
+- Build `monitor-client` into `web/pkg` before running or building the frontend because `web/package.json` depends on `monitor-client` as `file:./pkg`.
+- Do not commit generated build outputs such as `target/`, `web/dist/`, `web/pkg/`, or `node_modules/` unless project policy changes.
 
 ## File Organization
 
 | What | Where | Notes |
 |------|-------|-------|
-| Shared source code | `monitor-common/src/` | Domain model and live protocol definitions |
-| WASM client source | `monitor-client/src/` | Renderer, audio, player, and live-monitor runtime |
-| Backend source | `monitor-proxy/src/` | Handlers, services, entities, middleware, utils |
-| DB migrations | `monitor-proxy/migration/src/` | Incremental SeaORM migrations |
-| Frontend source | `web/src/` | Vue views, app shell, and i18n |
-| Tests | Co-located in Rust modules | No top-level `tests/` directory found |
-| Static assets | `web/public/assets/` | Resource-pack images and sounds |
-| Documentation | `README.md` and tracker docs | README is the only repo-native project doc found |
+| Shared Rust domain types | `monitor-common/src/` | Chart, animation, audio, texture, and live protocol data. |
+| Backend server | `monitor-proxy/src/` | `main.rs`, `router.rs`, handlers, services, middleware, entities, utilities. |
+| Backend migrations | `monitor-proxy/migration/src/` | SeaORM migration crate. |
+| WASM engine | `monitor-client/src/` | Browser-exposed classes plus renderer, engine, audio, and time modules. |
+| Frontend UI | `web/src/` | Vue app, views, and i18n. |
+| Frontend static assets | `web/public/assets/` | Default resource pack files. |
+| CI | `.github/workflows/` | Rust-only CI at present. |
 
 ## Import / Module Conventions
 
-- **Import style**: Rust code uses explicit `mod` trees and targeted `use` lists; TS/Vue code uses relative imports and local package imports such as `monitor-client`.
-- **Module visibility**: modules are private by default and re-exported explicitly through `lib.rs`, `handlers.rs`, `services.rs`, `dtos.rs`, and `entity.rs`.
-- **Circular dependencies**: not explicitly checked by tooling; keep the current layered dependency direction (`web` -> `monitor-client`; proxy/WASM -> `monitor-common`).
+- Rust modules are declared explicitly in `mod.rs`-style aggregator files or crate entry points.
+- Public exports should be intentional; most backend modules are internal to `monitor-proxy`.
+- Vue code uses ES module imports and Composition API inside `<script setup lang="ts">`.
+- Avoid circular crate dependencies: `monitor-proxy` and `monitor-client` depend on `monitor-common`; `monitor-common` must remain independent from them.
 
 ## Error Handling
 
-- **Error representation**: backend routes use `crate::error::Result<T>` and `AppError`; service code commonly uses `anyhow::Result`.
-- **Error propagation**: Rust uses `?` plus `AppErrorExt` helpers like `internal_server_error`, `bad_request`, and `unauthorized`.
-- **Error context**: non-trivial service code wraps failures with context strings before surfacing them.
-- **Panics / asserts**: acceptable at startup for unrecoverable setup failures (DB connect/migrate, service bootstrap) and in tests; avoid panics in request paths.
+- Backend handlers return the project `Result<Response>` alias and convert service errors through `error` helpers.
+- Use `?` for propagation and add context where errors cross subsystem boundaries.
+- Startup uses `expect` for unrecoverable database migration and service initialization failures.
+- WASM public methods return `Result<_, JsValue>` for JavaScript-visible failures.
+- Log backend operational failures with `log` / `env_logger`; frontend/WASM currently logs browser-side failures to console.
 
 ## Testing Conventions
 
-- **Test location**: co-located next to Rust implementation modules under `#[cfg(test)]`.
-- **Test naming**: descriptive Rust test names, usually one behavior per test.
-- **Coverage target**: not specified.
-- **Mocking strategy**: minimal mocking; parser and math logic are tested directly, often with real sample data from `monitor-proxy/test_data/`.
+- Rust tests run with `cargo test --all`.
+- Test coverage threshold is not configured in the repository.
+- Prefer focused unit tests for parser/domain logic and integration-style tests for handlers/services where external services can be mocked or isolated.
+- No checked-in frontend test runner exists; add one deliberately before depending on frontend automated tests.
 
 ## Documentation Conventions
 
-- **Doc comments**: present on some key modules and exported types, especially in WASM-facing code.
-- **README**: currently the main project narrative, API reference, and deployment guide.
-- **CHANGELOG**: no changelog file found.
+- Keep README and tracker docs aligned when routes, build commands, or runtime configuration change.
+- Use English for tracker docs even when README contains Chinese project documentation.
+- Document public endpoints, CLI flags, environment variables, and generated-artifact prerequisites.
 
 ## Agent Instructions
 
-- No repo-local `AGENTS.md`, `.claude/CLAUDE.md`, `.claude/rules/`, or `.agents/rules/` files were found.
-- Preserve the monorepo split between shared crate, backend, WASM crate, and frontend instead of collapsing responsibilities.
-- Treat checked-in generated frontend/WASM artifacts as derived outputs unless the task explicitly asks to rebuild or update them.
-- When documenting or changing runtime behavior, keep README claims aligned with actual routes, flags, and workspace member responsibilities.
+- Use `rg` / `rg --files` for project search.
+- Do not overwrite existing tracker files; create missing files and report skipped files.
+- Verify code claims against source files rather than relying only on README text.
+- After editing code or generated docs, run the relevant validation when feasible.
+- Before commits, ensure no hardcoded secrets are introduced and run the Rust CI-equivalent checks when practical.

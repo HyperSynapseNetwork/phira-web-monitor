@@ -10,6 +10,7 @@ use monitor_common::core::{
     Chart, ChartInfo, JudgeLineKind, JudgeStatus, Judgement, Matrix, NoteKind, Vector,
 };
 use nalgebra::{Matrix3, Rotation2};
+use std::collections::HashMap;
 use std::f32::consts::PI;
 use wasm_bindgen::prelude::*;
 
@@ -21,6 +22,11 @@ pub struct ChartRenderer {
     pub time: f32, // Seconds
     pub world_matrices: Vec<Option<Matrix>>,
     pub autoplay: bool,
+}
+
+pub struct LoadedLineTextures {
+    pub line_textures: HashMap<usize, Texture>,
+    pub line_gif_textures: HashMap<usize, Vec<Texture>>,
 }
 
 impl ChartRenderer {
@@ -199,6 +205,15 @@ impl ChartRenderer {
         }
     }
 
+    pub fn has_custom_line_textures(&self) -> bool {
+        self.chart.lines.iter().any(|line| {
+            matches!(
+                line.kind,
+                JudgeLineKind::Texture(_, _) | JudgeLineKind::TextureGif(_, _, _)
+            )
+        })
+    }
+
     /// Emit particles for judge events. Must be called after `update_judges()`
     /// and before `render()` so particles appear on the correct frame.
     pub fn emit_particles(&self, res: &mut Resource, events: &[JudgeEvent]) {
@@ -242,14 +257,22 @@ impl ChartRenderer {
         ctx: &GlContext,
         res: &mut Resource,
     ) -> Result<(), JsValue> {
-        res.line_textures.clear();
-        res.line_gif_textures.clear();
+        let loaded = Self::load_line_texture_maps(ctx, &self.chart).await?;
+        Self::apply_line_textures(res, loaded);
+        Ok(())
+    }
 
-        for (i, line) in self.chart.lines.iter().enumerate() {
+    pub async fn load_line_texture_maps(
+        ctx: &GlContext,
+        chart: &Chart,
+    ) -> Result<LoadedLineTextures, JsValue> {
+        let mut line_textures = HashMap::new();
+        let mut line_gif_textures = HashMap::new();
+        for (i, line) in chart.lines.iter().enumerate() {
             match &line.kind {
                 JudgeLineKind::Texture(tex, _) => {
                     if let Ok(texture) = Texture::load_from_bytes(ctx, tex.data()).await {
-                        res.line_textures.insert(i, texture);
+                        line_textures.insert(i, texture);
                     }
                 }
                 JudgeLineKind::TextureGif(_, frames, _) => {
@@ -259,12 +282,20 @@ impl ChartRenderer {
                             gl_frames.push(texture);
                         }
                     }
-                    res.line_gif_textures.insert(i, gl_frames);
+                    line_gif_textures.insert(i, gl_frames);
                 }
                 _ => {}
             }
         }
 
-        Ok(())
+        Ok(LoadedLineTextures {
+            line_textures,
+            line_gif_textures,
+        })
+    }
+
+    pub fn apply_line_textures(res: &mut Resource, loaded: LoadedLineTextures) {
+        res.line_textures = loaded.line_textures;
+        res.line_gif_textures = loaded.line_gif_textures;
     }
 }
