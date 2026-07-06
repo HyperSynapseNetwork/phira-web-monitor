@@ -9,3 +9,6 @@ pub use room_handler::*;
 
 pub mod live_handler;
 pub use live_handler::*;
+
+pub mod topchart_handler;
+pub use topchart_handler::*;

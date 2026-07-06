@@ -30,6 +30,7 @@ pub struct AppStateInner {
     pub chart_service: services::ChartService,
     pub room_service: services::RoomService,
     pub live_service: services::LiveService,
+    pub topchart_service: services::TopChartService,
 }
 
 #[derive(Clone)]
@@ -44,23 +45,24 @@ impl AppState {
         Migrator::up(&db, None)
             .await
             .expect("Failed to run database migrations");
-
         info!("Database connected and migrations applied.");
 
-        let room_service = services::RoomService::new(&config.mp_server)
-            .await
-            .inspect_err(|e| error!("failed to setup RoomService: {e}"))
-            .unwrap();
-
-        Self(Arc::new(AppStateInner {
-            config,
-            db,
+        let this = Self(Arc::new(AppStateInner {
             http_client: Client::new(),
             auth_service: services::AuthService::new(),
             chart_service: services::ChartService::new(),
-            room_service,
+            room_service: services::RoomService::new(&config.mp_server)
+                .await
+                .inspect_err(|e| error!("failed to setup RoomService: {e}"))
+                .unwrap(),
             live_service: services::LiveService::new(),
-        }))
+            topchart_service: services::TopChartService::new(),
+            config,
+            db,
+        }));
+        let _ = this.topchart_service.launch_update_task(this.clone());
+
+        this
     }
 }
 

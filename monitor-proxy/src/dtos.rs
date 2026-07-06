@@ -6,3 +6,6 @@ pub use room_dto::*;
 
 pub mod visited_dto;
 pub use visited_dto::*;
+
+pub mod topchart_dto;
+pub use topchart_dto::*;
