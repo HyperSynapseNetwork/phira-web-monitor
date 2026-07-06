@@ -1,5 +1,5 @@
 mod chart;
-pub use chart::ChartRenderer;
+pub use chart::{ChartRenderer, LoadedLineTextures};
 
 mod judge;
 pub use judge::{JudgeEvent, JudgeEventKind};

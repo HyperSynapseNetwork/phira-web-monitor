@@ -82,6 +82,10 @@ impl ShaderManager {
     }
 
     pub fn use_program(&mut self, ctx: &GlContext, name: &str) {
+        if self.current_program.as_deref() == Some(name) {
+            return;
+        }
+
         if let Some(program) = self.programs.get(name) {
             ctx.gl.use_program(Some(program));
             self.current_program = Some(name.to_string());

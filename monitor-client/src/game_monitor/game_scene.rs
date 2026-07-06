@@ -3,9 +3,10 @@
 use crate::{
     audio::AudioEngine,
     console_log,
-    engine::{ChartRenderer, JudgeEvent, JudgeEventKind, Resource},
+    engine::{ChartRenderer, JudgeEvent, JudgeEventKind, LoadedLineTextures, Resource},
     renderer::Renderer,
     time::TimeManager,
+    viewport::letterbox_viewport,
 };
 use monitor_common::core::{
     AnimVector, Chart, ChartInfo, HitSound, JudgeStatus, Judgement, Keyframe, NoteKind,
@@ -231,8 +232,10 @@ impl GameScene {
         }
         self.sync_audio();
 
-        // Mark that line textures need loading (will be picked up by GameMonitor)
-        self.needs_texture_load = true;
+        self.needs_texture_load = self
+            .chart_renderer
+            .as_ref()
+            .is_some_and(ChartRenderer::has_custom_line_textures);
 
         console_log!("GameScene[{}]: chart loaded", self.user_id);
     }
@@ -268,6 +271,30 @@ impl GameScene {
     /// Whether line textures need to be (re-)loaded.
     pub fn needs_texture_load(&self) -> bool {
         self.needs_texture_load && self.render_ctx.is_some() && self.chart_renderer.is_some()
+    }
+
+    pub fn take_line_texture_job(&mut self) -> Option<(crate::renderer::GlContext, Chart)> {
+        if !self.needs_texture_load() {
+            return None;
+        }
+
+        self.needs_texture_load = false;
+        let ctx = self.render_ctx.as_ref()?.renderer.context.clone();
+        let chart = self.chart_renderer.as_ref()?.chart.clone();
+        Some((ctx, chart))
+    }
+
+    pub fn apply_line_textures(&mut self, loaded: LoadedLineTextures) {
+        if let Some(ctx) = &mut self.render_ctx {
+            ChartRenderer::apply_line_textures(&mut ctx.resource, loaded);
+            console_log!("GameScene[{}]: applied async line textures", self.user_id);
+        }
+    }
+
+    pub fn mark_line_textures_pending(&mut self) {
+        if self.render_ctx.is_some() && self.chart_renderer.is_some() {
+            self.needs_texture_load = true;
+        }
     }
 
     /// Load default texture resources into the scene's WebGL context.
@@ -566,36 +593,26 @@ impl GameScene {
 
     /// Resize the scene's canvas.
     pub fn resize(&mut self, width: u32, height: u32) {
-        let screen_ratio = width as f32 / height as f32;
         let design_ratio = self
             .chart_renderer
             .as_ref()
             .map(|cr| cr.info.aspect_ratio)
             .unwrap_or(16.0 / 9.0);
-
-        // Cap at design ratio (match Phira's non-fix mode)
-        let aspect_ratio = design_ratio.min(screen_ratio);
-
-        // Compute letterboxed viewport
-        let (vp_w, vp_h) = if screen_ratio > aspect_ratio {
-            let vp_w = (height as f32 * aspect_ratio).round() as u32;
-            (vp_w, height)
-        } else {
-            let vp_h = (width as f32 / aspect_ratio).round() as u32;
-            (width, vp_h)
+        let Some(layout) = letterbox_viewport(width, height, design_ratio) else {
+            return;
         };
-
-        // Center the viewport
-        let vp_x = (width - vp_w) / 2;
-        let vp_y = (height - vp_h) / 2;
 
         if let Some(ctx) = &mut self.render_ctx {
             ctx.renderer.resize(width, height);
-            ctx.renderer
-                .set_viewport(vp_x as i32, vp_y as i32, vp_w, vp_h);
+            ctx.renderer.set_viewport(
+                layout.viewport.x,
+                layout.viewport.y,
+                layout.viewport.width,
+                layout.viewport.height,
+            );
             ctx.resource.width = width;
             ctx.resource.height = height;
-            ctx.resource.aspect_ratio = aspect_ratio;
+            ctx.resource.aspect_ratio = layout.aspect_ratio;
         }
     }
 

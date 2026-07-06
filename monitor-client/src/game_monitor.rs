@@ -9,8 +9,10 @@ use std::{
     rc::Rc,
 };
 
+use crate::chart_asset::{fetch_and_parse_chart, file_map_from_js_object};
+use crate::engine::{ChartRenderer, LoadedLineTextures};
 use monitor_common::{
-    core::{Chart, ChartInfo, JudgeLineKind},
+    core::{Chart, ChartInfo},
     live::{LiveEvent, WsCommand},
 };
 use phira_mp_common::{Message, RoomState, decode_packet, encode_packet};
@@ -58,7 +60,12 @@ pub struct GameMonitor {
 
     // Pending line texture load results (from spawn_local)
     #[wasm_bindgen(skip)]
-    pub pending_line_textures: Rc<RefCell<Vec<i32>>>,
+    completed_line_textures: Rc<RefCell<Vec<LineTextureJobResult>>>,
+}
+
+struct LineTextureJobResult {
+    user_id: i32,
+    result: Result<LoadedLineTextures, JsValue>,
 }
 
 #[wasm_bindgen]
@@ -126,7 +133,7 @@ impl GameMonitor {
             _onmessage: onmessage,
             _onclose: onclose,
             _onerror: onerror,
-            pending_line_textures: Rc::new(RefCell::new(Vec::new())),
+            completed_line_textures: Rc::new(RefCell::new(Vec::new())),
         })
     }
 
@@ -199,32 +206,15 @@ impl GameMonitor {
     /// Load chart data provided by the frontend (fetched via API)
     /// and apply it to all currently active scenes.
     fn load_chart(&mut self, info: ChartInfo, chart: Chart) {
-        // Check if any lines have custom textures
-        let has_custom_textures = chart.lines.iter().any(|line| {
-            matches!(
-                line.kind,
-                JudgeLineKind::Texture(_, _) | JudgeLineKind::TextureGif(_, _, _)
-            )
-        });
-
         self.chart_info = Some(info.clone());
         self.chart_data = Some(chart.clone());
-
-        // Collect scene IDs that need texture loading (have canvas and chart has textures)
-        let mut scenes_needing_textures = Vec::new();
 
         for (uid, scene) in self.scenes.iter_mut() {
             scene.load_chart(info.clone(), chart.clone());
             console_log!("GameMonitor: applied chart to scene for user {}", uid);
-            if has_custom_textures && scene.needs_texture_load() {
-                scenes_needing_textures.push(*uid);
+            if let Some((ctx, chart)) = scene.take_line_texture_job() {
+                spawn_line_texture_job(self.completed_line_textures.clone(), *uid, ctx, chart);
             }
-        }
-
-        // Spawn async texture loading for scenes that already have a canvas attached
-        if !scenes_needing_textures.is_empty() {
-            let pending = self.pending_line_textures.clone();
-            pending.borrow_mut().extend(scenes_needing_textures);
         }
     }
 
@@ -248,23 +238,25 @@ impl GameMonitor {
             self.load_chart(info, chart);
         }
 
-        // Process pending line texture loads
-        let texture_uids: Vec<i32> = self.pending_line_textures.borrow_mut().drain(..).collect();
-        for uid in texture_uids {
-            if let Some(scene) = self.scenes.get_mut(&uid)
-                && scene.needs_texture_load()
-            {
-                console_log!("GameMonitor: spawning line texture load for scene {}", uid);
-                // We can't await here (tick is sync), so we use spawn_local.
-                // We need to use a raw pointer trick since GameScene is not 'static.
-                // SAFETY: The scene pointer is valid for the duration of the spawn_local
-                // future because GameMonitor (and thus scenes HashMap) lives for the
-                // lifetime of the WASM module, and spawn_local runs on the same thread.
-                let scene_ptr = scene as *mut GameScene;
-                spawn_local(async move {
-                    let scene = unsafe { &mut *scene_ptr };
-                    scene.load_line_textures().await;
-                });
+        let completed_texture_jobs: Vec<_> = self
+            .completed_line_textures
+            .borrow_mut()
+            .drain(..)
+            .collect();
+        for job in completed_texture_jobs {
+            let Some(scene) = self.scenes.get_mut(&job.user_id) else {
+                continue;
+            };
+            match job.result {
+                Ok(loaded) => scene.apply_line_textures(loaded),
+                Err(err) => {
+                    scene.mark_line_textures_pending();
+                    console_log!(
+                        "GameMonitor: line texture load failed for #{}: {:?}",
+                        job.user_id,
+                        err
+                    );
+                }
             }
         }
 
@@ -368,17 +360,11 @@ impl GameMonitor {
                     self.destroy_scene(*user);
                 }
                 LiveEvent::Touches { player, frames } => {
-                    for f in frames {
-                        console_log!("GameMonitor: TouchFrame received for #{player}: {f:?}");
-                    }
                     if let Some(scene) = self.scenes.get_mut(player) {
                         scene.push_touches(frames);
                     }
                 }
                 LiveEvent::Judges { player, judges } => {
-                    for j in judges {
-                        console_log!("GameMonitor: JudgeEvent for #{player}: {j:?}");
-                    }
                     if let Some(scene) = self.scenes.get_mut(player) {
                         scene.push_judges(judges);
                     }
@@ -420,18 +406,7 @@ impl GameMonitor {
         user_id: i32,
         files: js_sys::Object,
     ) -> Result<(), JsValue> {
-        let entries = js_sys::Object::entries(&files);
-        let mut file_map = std::collections::HashMap::new();
-
-        for i in 0..entries.length() {
-            let entry = entries.get(i);
-            let entry_array = js_sys::Array::from(&entry);
-            let key = entry_array.get(0).as_string().ok_or("Invalid key")?;
-            let value = entry_array.get(1);
-            let uint8_array = js_sys::Uint8Array::new(&value);
-            file_map.insert(key, uint8_array.to_vec());
-        }
-
+        let file_map = file_map_from_js_object(files)?;
         if let Some(scene) = self.scenes.get_mut(&user_id) {
             scene.load_resource_pack(file_map).await?;
         }
@@ -456,33 +431,16 @@ impl GameMonitor {
     }
 }
 
-async fn fetch_and_parse_chart(api_base: &str, id: i32) -> Result<(ChartInfo, Chart), JsValue> {
-    let window = web_sys::window().ok_or("no window")?;
-    let resp_value = wasm_bindgen_futures::JsFuture::from(
-        window.fetch_with_str(&format!("{}/chart/{}", api_base, id)),
-    )
-    .await?;
-    let resp: web_sys::Response = resp_value.dyn_into()?;
-
-    if !resp.ok() {
-        return Err(JsValue::from_str(&format!(
-            "Fetch failed: {}",
-            resp.status_text()
-        )));
-    }
-
-    let array_buffer = wasm_bindgen_futures::JsFuture::from(resp.array_buffer()?).await?;
-    let uint8_array = js_sys::Uint8Array::new(&array_buffer);
-    let vec = uint8_array.to_vec();
-
-    use bincode::Options;
-    let (info, mut chart): (ChartInfo, Chart) = bincode::options()
-        .with_varint_encoding()
-        .deserialize(&vec)
-        .map_err(|e| JsValue::from_str(&format!("Failed to parse chart: {}", e)))?;
-
-    chart.order = (0..chart.lines.len()).collect();
-    chart.order.sort_by_key(|&i| chart.lines[i].z_index);
-
-    Ok((info, chart))
+fn spawn_line_texture_job(
+    completed: Rc<RefCell<Vec<LineTextureJobResult>>>,
+    user_id: i32,
+    ctx: crate::renderer::GlContext,
+    chart: Chart,
+) {
+    spawn_local(async move {
+        let result = ChartRenderer::load_line_texture_maps(&ctx, &chart).await;
+        completed
+            .borrow_mut()
+            .push(LineTextureJobResult { user_id, result });
+    });
 }
