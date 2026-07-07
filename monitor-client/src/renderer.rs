@@ -75,7 +75,17 @@ impl Renderer {
     }
 
     pub fn begin_frame(&mut self) {
+        self.context.gl.blend_func(
+            web_sys::WebGl2RenderingContext::SRC_ALPHA,
+            web_sys::WebGl2RenderingContext::ONE_MINUS_SRC_ALPHA,
+        );
+        self.context
+            .gl
+            .active_texture(web_sys::WebGl2RenderingContext::TEXTURE0);
+        self.batcher.invalidate_texture_cache();
         self.shader_manager.use_program(&self.context, "default");
+        self.shader_manager
+            .set_uniform_matrix4fv(&self.context, "u_projection", &self.projection);
         // Ensure u_texture is set to unit 0
         let loc = self
             .shader_manager

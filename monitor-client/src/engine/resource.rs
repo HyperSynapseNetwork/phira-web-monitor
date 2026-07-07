@@ -361,6 +361,11 @@ impl ParticleEmitter {
             &renderer.white_texture,
         );
 
+        // Particle emitters bind their own raw WebGL program. Restore the batched
+        // renderer's default program and projection before the next frame uses it.
+        let projection = renderer.projection;
+        renderer.set_projection(&projection);
+
         // Invalidate texture cache because we tampered with Unit 0
         renderer.batcher.invalidate_texture_cache();
     }

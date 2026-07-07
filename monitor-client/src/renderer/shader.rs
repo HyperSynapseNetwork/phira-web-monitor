@@ -82,10 +82,6 @@ impl ShaderManager {
     }
 
     pub fn use_program(&mut self, ctx: &GlContext, name: &str) {
-        if self.current_program.as_deref() == Some(name) {
-            return;
-        }
-
         if let Some(program) = self.programs.get(name) {
             ctx.gl.use_program(Some(program));
             self.current_program = Some(name.to_string());
@@ -103,12 +99,10 @@ impl ShaderManager {
     pub fn get_uniform_location(
         &self,
         ctx: &GlContext,
-        _: &str,
+        program_name: &str,
         uniform: &str,
     ) -> Option<WebGlUniformLocation> {
-        if let Some(name) = &self.current_program
-            && let Some(program) = self.programs.get(name)
-        {
+        if let Some(program) = self.programs.get(program_name) {
             return ctx.gl.get_uniform_location(program, uniform);
         }
         None
